@@ -226,6 +226,33 @@ async function digest(
   return 0;
 }
 
+/**
+ * The whole workflow in one shot: capture → weekly digest (open-ended detector
+ * + remote synthesis). `--local` stops before any remote call (capture + the
+ * fully-local digest). All the usual digest flags (`--redact`, `--week`, …)
+ * apply.
+ */
+async function run(
+  dbPath: string,
+  localModel: string,
+  remoteModel: string,
+  minConfidence: number,
+  opts: { local: boolean; week?: string; redact?: string },
+): Promise<number> {
+  console.log("━━ 1/2  capture ━━");
+  const captured = await capture(dbPath);
+  if (captured !== 0) return captured;
+
+  console.log("\n━━ 2/2  digest ━━");
+  // The "full" workflow is the remote path; --local keeps it on-machine.
+  return await digest(dbPath, localModel, remoteModel, minConfidence, {
+    send: !opts.local,
+    explore: !opts.local,
+    week: opts.week,
+    redact: opts.redact,
+  });
+}
+
 async function serve(dbPath: string, port: number): Promise<number> {
   const { startServer } = await import("./dashboard.ts");
   startServer(dbPath, port);
@@ -245,6 +272,7 @@ export async function main(argv: string[]): Promise<number> {
       "min-confidence": { type: "string", default: "0.6" },
       send: { type: "boolean", default: false },
       explore: { type: "boolean", default: false },
+      local: { type: "boolean", default: false },
       redact: { type: "string" },
       week: { type: "string" },
     },
@@ -274,11 +302,23 @@ export async function main(argv: string[]): Promise<number> {
           redact: values.redact as string | undefined,
         },
       );
+    case "run":
+      return await run(
+        dbPath,
+        values.model as string,
+        values["remote-model"] as string,
+        Number(values["min-confidence"]),
+        {
+          local: values.local as boolean,
+          week: values.week as string | undefined,
+          redact: values.redact as string | undefined,
+        },
+      );
     case "serve":
       return await serve(dbPath, Number(values.port));
     default:
       console.error(
-        'usage: postcaptain <capture|stats|insights|ask "q"|digest|serve> [--db PATH] [--port N] [--model M] [--remote-model M] [--min-confidence C] [--redact strict|identifiers|raw] [--explore] [--week YYYY-MM-DD] [--send]',
+        'usage: postcaptain <run|capture|stats|insights|ask "q"|digest|serve> [--db PATH] [--port N] [--model M] [--remote-model M] [--min-confidence C] [--redact strict|identifiers|raw] [--explore] [--local] [--week YYYY-MM-DD] [--send]',
       );
       return 2;
   }

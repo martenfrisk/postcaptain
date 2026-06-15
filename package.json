@@ -10,6 +10,7 @@
     "postcaptain": "src/cli.ts"
   },
   "scripts": {
+    "all": "bun run src/cli.ts run",
     "capture": "bun run src/cli.ts capture",
     "stats": "bun run src/cli.ts stats",
     "insights": "bun run src/cli.ts insights",
