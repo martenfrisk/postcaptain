@@ -15,6 +15,7 @@ import * as copilot from "./collectors/copilot.ts";
 import * as github from "./collectors/github.ts";
 import { detectAll } from "./detectors.ts";
 import { ollamaClient } from "./llm.ts";
+import { answer } from "./query.ts";
 import { sessionize } from "./sessionizer.ts";
 import { EventStore } from "./store.ts";
 
@@ -97,6 +98,24 @@ async function insights(dbPath: string, model: string, minConfidence: number): P
   return 0;
 }
 
+/** Interactive query: answer a question grounded in the captured activity. */
+async function ask(dbPath: string, model: string, question: string): Promise<number> {
+  if (!question.trim()) {
+    console.error('usage: postcaptain ask "your question" [--db PATH] [--model M]');
+    return 2;
+  }
+  const store = new EventStore(dbPath);
+  let events: ReturnType<EventStore["query"]>;
+  try {
+    events = store.query();
+  } finally {
+    store.close();
+  }
+  const reply = await answer(question, events, sessionize(events), ollamaClient({ model }));
+  console.log(reply);
+  return 0;
+}
+
 async function serve(dbPath: string, port: number): Promise<number> {
   const { startServer } = await import("./dashboard.ts");
   startServer(dbPath, port);
@@ -106,7 +125,7 @@ async function serve(dbPath: string, port: number): Promise<number> {
 
 export async function main(argv: string[]): Promise<number> {
   const cmd = argv[0];
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: argv.slice(1),
     options: {
       db: { type: "string", default: "./postcaptain.db" },
@@ -114,7 +133,7 @@ export async function main(argv: string[]): Promise<number> {
       model: { type: "string", default: "llama3.2:latest" },
       "min-confidence": { type: "string", default: "0.6" },
     },
-    allowPositionals: false,
+    allowPositionals: true,
   });
   const dbPath = values.db as string;
 
@@ -125,11 +144,13 @@ export async function main(argv: string[]): Promise<number> {
       return stats(dbPath);
     case "insights":
       return await insights(dbPath, values.model as string, Number(values["min-confidence"]));
+    case "ask":
+      return await ask(dbPath, values.model as string, positionals.join(" "));
     case "serve":
       return await serve(dbPath, Number(values.port));
     default:
       console.error(
-        "usage: postcaptain <capture|stats|insights|serve> [--db PATH] [--port N] [--model M] [--min-confidence C]",
+        'usage: postcaptain <capture|stats|insights|ask "q"|serve> [--db PATH] [--port N] [--model M] [--min-confidence C]',
       );
       return 2;
   }

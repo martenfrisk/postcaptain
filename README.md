@@ -18,11 +18,11 @@ See [`work-mentor-design.md`](work-mentor-design.md) for the full design.
 ## Status
 
 The local pipeline is working end-to-end:
-**capture → sessionize → detect → characterize → recap → dashboard**
-(design phases 1–2 and the phase-3 characterizer). The characterizer runs on a
-local Ollama model and drafts a concrete artifact per finding. Still pending:
-the weekly remote synthesis (needs Copilot CLI), themes/lessons, and the
-exploration tier (phases 3-interactive, 4, 5).
+**capture → sessionize → detect → characterize → recap → dashboard**, plus
+**interactive `ask`** — design phases 1–2 and all of phase 3 (characterizer +
+interactive query). The model layers run on a local Ollama model. Still pending:
+the weekly *remote* synthesis (needs Copilot CLI), themes/lessons (phase 4), and
+the exploration tier (phase 5).
 
 ### Done so far
 
@@ -57,6 +57,9 @@ bun run src/cli.ts stats   --db ./postcaptain.db
 # characterize findings into insights + drafted artifacts (needs a local Ollama)
 bun run src/cli.ts insights --db ./postcaptain.db --model llama3.2:latest
 
+# ask a question about your own activity (retrieval-augmented, local model)
+bun run src/cli.ts ask "when did I work on the proxy config?" --db ./postcaptain.db
+
 # open the dashboard
 bun run src/cli.ts serve   --db ./postcaptain.db    # → http://localhost:4317
 
@@ -87,9 +90,10 @@ src/
   sessionizer.ts       # events → ticket-keyed work sessions
   detectors.ts         # no-LLM pattern detectors → candidates
   characterizer.ts     # local-LLM candidate → insight (+ drafted artifact)
+  query.ts             # interactive retrieval-augmented Q&A over the store
   llm.ts               # Ollama client (generate + embeddings) + cosine distance
   recap.ts             # daily recap aggregation
   dashboard.ts         # local web dashboard (Bun.serve, server-rendered)
-  cli.ts               # capture / stats / insights / serve
+  cli.ts               # capture / stats / insights / ask / serve
 tests/                 # *.test.ts tests (synthetic fixtures + a temp git repo)
 ```
