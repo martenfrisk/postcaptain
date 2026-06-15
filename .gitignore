@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Local capture artifacts — never commit captured activity
+*.db
+*.db-wal
+*.db-shm
+postcaptain.db
