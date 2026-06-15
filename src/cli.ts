@@ -11,6 +11,7 @@
 
 import { parseArgs } from "node:util";
 import { characterizeAll } from "./characterizer.ts";
+import * as calendar from "./collectors/calendar.ts";
 import * as copilot from "./collectors/copilot.ts";
 import * as github from "./collectors/github.ts";
 import { type Candidate, detectAll } from "./detectors.ts";
@@ -48,6 +49,8 @@ async function capture(dbPath: string): Promise<number> {
     );
     const gitAdded = store.addMany(await github.collect());
     console.log(`git:     +${gitAdded} new commit events (${store.count("commit")} total)`);
+    const calAdded = store.addMany(calendar.collect());
+    console.log(`calendar: +${calAdded} new meeting events (${store.count("meeting")} total)`);
     console.log(`→ ${dbPath}`);
   } finally {
     store.close();

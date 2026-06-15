@@ -195,7 +195,7 @@ The actual numbers stay data-driven; what's resolved here is the *mechanism* tha
 - **Abandonment:** AI asked, then done manually anyway → workflow gap, not a prompt gap.
 - **Re-research:** same doc/URL revisited N times → promote to a knowledge-base note.
 - **Context-switching / fragmentation:** focus churn + meeting interleaving vs completion speed → time-blocking suggestions.
-- **Meeting load / maker-time:** meeting density vs available focus blocks.
+- **Meeting load / maker-time:** meeting density vs available focus blocks. — *built (`meetingLoadDetector`): timed meetings (all-day blocks excluded) over a heavy day-rate threshold, emitted as a tracked lesson (§7) with meeting-hours as the trend metric. The fuller "vs available focus blocks" half awaits ActivityWatch focus data.*
 - **AI-first opportunities:** recurring multi-step Jira→branch→PR or MCP sequences → draft a tailored agent/command (see §7).
 
 ---
@@ -377,7 +377,7 @@ Cap screenpipe's disk usage in its own settings as a backstop.
 
 ### Suggested phasing
 
-1. **Capture + store:** collectors → normalized event store (start with Copilot + GitHub + ActivityWatch + calendar). — *built: Copilot chat + local git collectors → `bun:sqlite` store; sessionizer.*
+1. **Capture + store:** collectors → normalized event store (start with Copilot + GitHub + ActivityWatch + calendar). — *built: Copilot chat, local git, and macOS Calendar collectors → `bun:sqlite` store; sessionizer. (Calendar reads the local `Calendar.sqlitedb`, so a synced Outlook/Exchange work calendar is captured with no remote API.) ActivityWatch still pending.*
 2. **Deterministic detectors + daily/weekly digest:** prove the insight format is useful. — *built: no-LLM detectors, daily recap, a local dashboard, and the weekly remote digest (Copilot CLI, behind the redaction gate).*
 3. **Characterizer harness + interactive query:** the one-agent-two-modes layer. — *built: characterizer (local Ollama; candidate → insight + drafted artifact, deterministic fallback) and interactive `ask` (retrieval-augmented Q&A). A full tool-using agent loop is the richer future version.*
 4. **Themes + lessons:** longitudinal tracking. — *built (lessons): `themes.ts`

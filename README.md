@@ -40,11 +40,13 @@ exploration tier (phase 5).
 - **Store** (`src/store.ts`, `bun:sqlite`) — one `events` table, idempotent
   inserts, filtered queries.
 - **Collectors** — Copilot chat (`collectors/copilot.ts`, from VS Code's
-  `state.vscdb` + `chatSessions/*.json`) and local git commits
-  (`collectors/github.ts`).
+  `state.vscdb` + `chatSessions/*.json`), local git commits
+  (`collectors/github.ts`), and macOS Calendar (`collectors/calendar.ts`, from
+  the local `Calendar.sqlitedb` — captures a synced Outlook/Exchange work
+  calendar with no remote API).
 - **Sessionizer** (`src/sessionizer.ts`) — events → ticket-keyed work sessions.
 - **Detectors** (`src/detectors.ts`) — no-LLM seed catalog (repetition, struggle,
-  follow-up habit, AI-cancel) → candidates with evidence + confidence.
+  follow-up habit, AI-cancel, meeting-load) → candidates with evidence + confidence.
 - **Daily recap** (`src/recap.ts`) — no-LLM day summary.
 - **Characterizer** (`src/characterizer.ts` + `src/llm.ts`) — local Ollama model
   enriches a candidate into a structured insight and drafts a concrete artifact;
@@ -154,6 +156,7 @@ src/
   collectors/
     copilot.ts         # VS Code / GitHub Copilot chat collector
     github.ts          # local git commit collector
+    calendar.ts        # macOS Calendar.sqlitedb → meeting events (Outlook/Exchange)
   sessionizer.ts       # events → ticket-keyed work sessions
   detectors.ts         # no-LLM pattern detectors → candidates (the backbone)
   explore.ts           # remote open-ended detector → extra candidates

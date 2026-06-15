@@ -181,11 +181,50 @@ export const canceledDetector: Detector = ({ events }) => {
   ];
 };
 
+/**
+ * Meeting load / maker-time: a heavy meeting day-rate eats the contiguous focus
+ * blocks maker work needs (§6). Tracked as a *lesson* so the theme layer (§7)
+ * can show meeting hygiene trending over weeks. All-day blocks (holidays,
+ * birthdays, OOO) are ignored — only timed meetings count. The metric is the
+ * window's meeting hours (lower = better), so a calmer week reads as improving.
+ */
+export const meetingLoadDetector: Detector = ({ events }) => {
+  const meetings = events
+    .filter((e) => e.kind === "meeting" && !e.payload.allDay)
+    .map((e) => ({ id: e.eventId, min: Number(e.payload.durationMin ?? 0), ts: e.ts }))
+    .filter((m) => m.min > 0 && m.min < 24 * 60);
+  if (meetings.length < 3) return [];
+
+  const totalMin = meetings.reduce((s, m) => s + m.min, 0);
+  const days = new Set(meetings.map((m) => Math.floor(m.ts / DAY_MS))).size;
+  const perDayHours = totalMin / 60 / Math.max(1, days);
+  // Conservative gate (§6 dial): only a genuinely heavy day-rate is notable.
+  if (perDayHours < 2.5) return [];
+
+  const totalHours = Math.round(totalMin / 60);
+  const avg = perDayHours.toFixed(1);
+  return [
+    {
+      detector: "meeting-load",
+      signature: "meeting-load",
+      headline: `${totalHours}h in ${meetings.length} meetings (~${avg}h/active day)`,
+      whatHappened: `Across ${days} day(s) with meetings, ~${avg}h/day went to ${meetings.length} timed meetings — squeezing maker time.`,
+      suggestion: "Batch meetings into blocks and protect a recurring maker-time slot.",
+      category: "lesson",
+      artifactType: "none",
+      evidence: meetings.map((m) => m.id).slice(0, 20),
+      confidence: clamp01(0.4 + (perDayHours - 2.5) * 0.15),
+      metric: totalHours,
+    },
+  ];
+};
+
 export const DETECTORS: Detector[] = [
   repetitionDetector,
   struggleDetector,
   followupHabitDetector,
   canceledDetector,
+  meetingLoadDetector,
 ];
 
 /** Run every detector and return candidates, highest confidence first. */

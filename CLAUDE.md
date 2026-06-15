@@ -17,7 +17,10 @@ the insight layer (detectors → themes → characterizer → weekly digest).
 
 The pipeline is working end-to-end: **capture → sessionize → detect →
 characterize → recap → dashboard**, plus interactive **`ask`**. Collectors:
-Copilot chat + local git commits. The model layers (`characterizer.ts`,
+Copilot chat, local git commits, and **macOS Calendar** (`collectors/calendar.ts`
+— reads the local `Calendar.sqlitedb`, so a work Outlook/Exchange account synced
+into Calendar.app is captured without any remote API; feeds the meeting-load
+lesson). The model layers (`characterizer.ts`,
 `query.ts`, `llm.ts`) run on a local Ollama model (default `llama3.2:latest`)
 via the `insights` and `ask` commands; both fall back gracefully if Ollama is
 down. The weekly *remote* synthesis (`digest`, via GitHub Copilot CLI) and the
@@ -96,3 +99,8 @@ access.
 - VS Code chat moved from inline `interactive.sessions` blobs to external
   `chatSessions/<id>.json` files indexed by `chat.ChatSessionStore.index`. The
   parser uses the index as the manifest and joins content from the JSON files.
+- macOS Calendar (`Calendar.sqlitedb`) is WAL-active and locked by Calendar.app;
+  the collector copies it **with its `-wal`/`-shm`** to temp (else recent events
+  are missed) and reads the copy. Dates are Core Data REAL (seconds since
+  2001-01-01 → add `978307200`, ×1000 for ms). An event is `entity_type = 2`
+  on-disk — **not** EventKit's documented `0` (verified against live data).

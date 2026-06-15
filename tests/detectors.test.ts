@@ -3,6 +3,7 @@ import {
   canceledDetector,
   detectAll,
   followupHabitDetector,
+  meetingLoadDetector,
   normalizePrompt,
   repetitionDetector,
   struggleDetector,
@@ -106,4 +107,38 @@ test("detectAll returns candidates sorted by confidence", () => {
   for (let i = 1; i < candidates.length; i++) {
     expect(candidates[i - 1]!.confidence).toBeGreaterThanOrEqual(candidates[i]!.confidence);
   }
+});
+
+let mseq = 0;
+function meeting(ts: number, durationMin: number, opts: { allDay?: boolean } = {}): Event {
+  return makeEvent({
+    eventId: `m${mseq++}`,
+    kind: "meeting",
+    source: "calendar",
+    ts,
+    sensitivity: "medium",
+    payload: { durationMin, allDay: opts.allDay ?? false, attendeeCount: 2 },
+  });
+}
+
+test("meeting-load: a heavy day-rate fires a tracked lesson with hours as the metric", () => {
+  // 3 days, ~3h of timed meetings each → ~3h/active day, over the 2.5h gate
+  const events: Event[] = [];
+  for (let d = 0; d < 3; d++) {
+    events.push(meeting(d * DAY + 9 * 60 * 60_000, 90));
+    events.push(meeting(d * DAY + 13 * 60 * 60_000, 90));
+  }
+  const [c] = meetingLoadDetector({ events, sessions: [] });
+  expect(c!.signature).toBe("meeting-load");
+  expect(c!.category).toBe("lesson");
+  expect(c!.metric).toBe(9); // 6 meetings × 90min = 9h total
+  expect(c!.evidence.length).toBe(6);
+});
+
+test("meeting-load: all-day blocks are ignored and a light load does not fire", () => {
+  const allDay = Array.from({ length: 5 }, (_, d) => meeting(d * DAY, 1440, { allDay: true }));
+  expect(meetingLoadDetector({ events: allDay, sessions: [] })).toEqual([]);
+
+  const light = [meeting(0, 30), meeting(DAY, 30), meeting(2 * DAY, 30)]; // ~0.5h/day
+  expect(meetingLoadDetector({ events: light, sessions: [] })).toEqual([]);
 });
