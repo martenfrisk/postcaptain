@@ -17,10 +17,12 @@ See [`work-mentor-design.md`](work-mentor-design.md) for the full design.
 
 ## Status
 
-The local, no-external-services pipeline is working end-to-end:
-**capture → sessionize → detect → recap → dashboard** (design phases 1–2).
-The model-powered layers (LLM characterizer, weekly Copilot-CLI synthesis,
-themes/lessons, exploration tier) are phases 3–5 and not built yet.
+The local pipeline is working end-to-end:
+**capture → sessionize → detect → characterize → recap → dashboard**
+(design phases 1–2 and the phase-3 characterizer). The characterizer runs on a
+local Ollama model and drafts a concrete artifact per finding. Still pending:
+the weekly remote synthesis (needs Copilot CLI), themes/lessons, and the
+exploration tier (phases 3-interactive, 4, 5).
 
 ### Done so far
 
@@ -35,6 +37,9 @@ themes/lessons, exploration tier) are phases 3–5 and not built yet.
 - **Detectors** (`src/detectors.ts`) — no-LLM seed catalog (repetition, struggle,
   follow-up habit, AI-cancel) → candidates with evidence + confidence.
 - **Daily recap** (`src/recap.ts`) — no-LLM day summary.
+- **Characterizer** (`src/characterizer.ts` + `src/llm.ts`) — local Ollama model
+  enriches a candidate into a structured insight and drafts a concrete artifact;
+  degrades to the deterministic candidate if Ollama is down.
 - **Dashboard** (`src/dashboard.ts`) — local web view: summary, recap, activity
   chart, expandable findings (with evidence), AI-usage read, recent sessions.
 
@@ -48,6 +53,9 @@ bun install                  # dev deps (types + tooling; runtime has zero deps)
 # capture local Copilot chat history + git commits into a SQLite store (idempotent)
 bun run src/cli.ts capture --db ./postcaptain.db
 bun run src/cli.ts stats   --db ./postcaptain.db
+
+# characterize findings into insights + drafted artifacts (needs a local Ollama)
+bun run src/cli.ts insights --db ./postcaptain.db --model llama3.2:latest
 
 # open the dashboard
 bun run src/cli.ts serve   --db ./postcaptain.db    # → http://localhost:4317
@@ -78,8 +86,10 @@ src/
     github.ts          # local git commit collector
   sessionizer.ts       # events → ticket-keyed work sessions
   detectors.ts         # no-LLM pattern detectors → candidates
+  characterizer.ts     # local-LLM candidate → insight (+ drafted artifact)
+  llm.ts               # Ollama client (generate + embeddings) + cosine distance
   recap.ts             # daily recap aggregation
   dashboard.ts         # local web dashboard (Bun.serve, server-rendered)
-  cli.ts               # capture / stats / serve
+  cli.ts               # capture / stats / insights / serve
 tests/                 # *.test.ts tests (synthetic fixtures + a temp git repo)
 ```

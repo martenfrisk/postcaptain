@@ -10,8 +10,12 @@
  */
 
 import { parseArgs } from "node:util";
+import { characterizeAll } from "./characterizer.ts";
 import * as copilot from "./collectors/copilot.ts";
 import * as github from "./collectors/github.ts";
+import { detectAll } from "./detectors.ts";
+import { ollamaClient } from "./llm.ts";
+import { sessionize } from "./sessionizer.ts";
 import { EventStore } from "./store.ts";
 
 async function capture(dbPath: string): Promise<number> {
@@ -58,6 +62,41 @@ function topN(counts: Map<string, number>, n: number): Record<string, number> {
   return Object.fromEntries([...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, n));
 }
 
+/**
+ * Run detectors, then the local-LLM characterizer over the candidates that
+ * clear the surfacing bar (§6), printing each insight + its drafted artifact.
+ */
+async function insights(dbPath: string, model: string, minConfidence: number): Promise<number> {
+  const store = new EventStore(dbPath);
+  let events: ReturnType<EventStore["query"]>;
+  try {
+    events = store.query();
+  } finally {
+    store.close();
+  }
+  const candidates = detectAll({ events, sessions: sessionize(events) });
+  const byId = new Map(events.map((e) => [e.eventId, e]));
+  const client = ollamaClient({ model });
+  const results = await characterizeAll(candidates, byId, client, { minConfidence });
+
+  if (results.length === 0) {
+    console.log(`No findings above confidence ${minConfidence}. Capture more activity.`);
+    return 0;
+  }
+  for (const i of results) {
+    const flag = i.characterized ? "" : "  (fallback — model unavailable)";
+    console.log(`\n● ${i.headline}  [${i.category} · ${(i.confidence * 100).toFixed(0)}%]${flag}`);
+    console.log(`  ${i.whatHappened}`);
+    console.log(`  → ${i.suggestion}`);
+    if (i.artifactDraft) {
+      console.log(`  ┌─ ${i.artifactType} ─────────────`);
+      for (const line of i.artifactDraft.split("\n")) console.log(`  │ ${line}`);
+      console.log("  └────────────────────");
+    }
+  }
+  return 0;
+}
+
 async function serve(dbPath: string, port: number): Promise<number> {
   const { startServer } = await import("./dashboard.ts");
   startServer(dbPath, port);
@@ -72,6 +111,8 @@ export async function main(argv: string[]): Promise<number> {
     options: {
       db: { type: "string", default: "./postcaptain.db" },
       port: { type: "string", default: "4317" },
+      model: { type: "string", default: "llama3.2:latest" },
+      "min-confidence": { type: "string", default: "0.6" },
     },
     allowPositionals: false,
   });
@@ -82,10 +123,14 @@ export async function main(argv: string[]): Promise<number> {
       return await capture(dbPath);
     case "stats":
       return stats(dbPath);
+    case "insights":
+      return await insights(dbPath, values.model as string, Number(values["min-confidence"]));
     case "serve":
       return await serve(dbPath, Number(values.port));
     default:
-      console.error("usage: postcaptain <capture|stats|serve> [--db PATH] [--port N]");
+      console.error(
+        "usage: postcaptain <capture|stats|insights|serve> [--db PATH] [--port N] [--model M] [--min-confidence C]",
+      );
       return 2;
   }
 }

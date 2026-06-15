@@ -15,11 +15,14 @@ the insight layer (detectors → themes → characterizer → weekly digest).
 
 ## Current phase
 
-The local, no-external-services pipeline is working end-to-end (design phases
-1–2): **capture → sessionize → detect → recap → dashboard**. Collectors:
-Copilot chat + local git commits. The model-powered layers (LLM characterizer,
-weekly Copilot-CLI synthesis, themes/lessons, exploration tier) are phases 3–5,
-not built yet — and depend on Ollama / Copilot CLI being wired up.
+The pipeline is working end-to-end: **capture → sessionize → detect →
+characterize → recap → dashboard**. Collectors: Copilot chat + local git
+commits. The characterizer (`characterizer.ts` + `llm.ts`) runs on a local
+Ollama model (default `llama3.2:latest`) via the `insights` command and drafts
+an artifact per finding; it falls back to the deterministic candidate if Ollama
+is down. Still pending: the weekly *remote* synthesis (needs Copilot CLI, which
+is not installed here), interactive query, themes/lessons, and the exploration
+tier (rest of phases 3–5).
 
 ## Stack & conventions
 
