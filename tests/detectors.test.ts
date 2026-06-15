@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   canceledDetector,
+  contextSwitchDetector,
   detectAll,
   followupHabitDetector,
   meetingLoadDetector,
@@ -141,4 +142,37 @@ test("meeting-load: all-day blocks are ignored and a light load does not fire", 
 
   const light = [meeting(0, 30), meeting(DAY, 30), meeting(2 * DAY, 30)]; // ~0.5h/day
   expect(meetingLoadDetector({ events: light, sessions: [] })).toEqual([]);
+});
+
+let fseq = 0;
+function focus(ts: number, durationSec: number, app = "Code"): Event {
+  return makeEvent({
+    eventId: `f${fseq++}`,
+    kind: "focus",
+    source: "activitywatch",
+    ts,
+    sensitivity: "medium",
+    payload: { app, title: "t", durationSec, durationMin: durationSec / 60 },
+  });
+}
+
+test("context-switching: a high switch-rate fires a tracked lesson with rate as the metric", () => {
+  // 60 episodes of 30s each = 30 min active → 120 switches/active hour (heavy)
+  const events = Array.from({ length: 60 }, (_, i) => focus(i * 30_000, 30));
+  const [c] = contextSwitchDetector({ events, sessions: [] });
+  expect(c!.signature).toBe("context-switching");
+  expect(c!.category).toBe("lesson");
+  expect(c!.metric).toBe(120);
+  expect(c!.evidence.length).toBe(20); // capped
+});
+
+test("context-switching: calm, sustained focus does not fire", () => {
+  // 24 episodes of 10 min each = 4h active → 6 switches/hour (calm)
+  const events = Array.from({ length: 24 }, (_, i) => focus(i * 600_000, 600));
+  expect(contextSwitchDetector({ events, sessions: [] })).toEqual([]);
+
+  // too few episodes → no judgement
+  expect(contextSwitchDetector({ events: [focus(0, 30), focus(1000, 30)], sessions: [] })).toEqual(
+    [],
+  );
 });

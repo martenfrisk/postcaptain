@@ -17,10 +17,13 @@ the insight layer (detectors → themes → characterizer → weekly digest).
 
 The pipeline is working end-to-end: **capture → sessionize → detect →
 characterize → recap → dashboard**, plus interactive **`ask`**. Collectors:
-Copilot chat, local git commits, and **macOS Calendar** (`collectors/calendar.ts`
+Copilot chat, local git commits, **macOS Calendar** (`collectors/calendar.ts`
 — reads the local `Calendar.sqlitedb`, so a work Outlook/Exchange account synced
 into Calendar.app is captured without any remote API; feeds the meeting-load
-lesson). The model layers (`characterizer.ts`,
+lesson), and **ActivityWatch** (`collectors/activitywatch.ts` — reads the local
+`aw-server` SQLite; window→`focus`, afk→`afk`, editor→`edit`, web→`reading`;
+feeds the context-switching lesson. Developed against AW's documented schema —
+verify on a machine actually running ActivityWatch). The model layers (`characterizer.ts`,
 `query.ts`, `llm.ts`) run on a local Ollama model (default `llama3.2:latest`)
 via the `insights` and `ask` commands; both fall back gracefully if Ollama is
 down. The weekly *remote* synthesis (`digest`, via GitHub Copilot CLI) and the
@@ -99,6 +102,12 @@ access.
 - VS Code chat moved from inline `interactive.sessions` blobs to external
   `chatSessions/<id>.json` files indexed by `chat.ChatSessionStore.index`. The
   parser uses the index as the manifest and joins content from the JSON files.
+- ActivityWatch stores everything in a local `aw-server` peewee SQLite
+  (`bucketmodel` + `eventmodel`); bucket `type` identifies the watcher and each
+  event's `datastr` is the watcher's JSON data dict. Timestamps are UTC (peewee
+  may render with a space or `T` — `parseAwTimestamp` normalizes both). The
+  collector reads all buckets generically, so the user's watcher install choice
+  needs no code change. The Rust server uses a different schema (unsupported).
 - macOS Calendar (`Calendar.sqlitedb`) is WAL-active and locked by Calendar.app;
   the collector copies it **with its `-wal`/`-shm`** to temp (else recent events
   are missed) and reads the copy. Dates are Core Data REAL (seconds since

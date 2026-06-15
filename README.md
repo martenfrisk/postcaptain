@@ -41,12 +41,15 @@ exploration tier (phase 5).
   inserts, filtered queries.
 - **Collectors** — Copilot chat (`collectors/copilot.ts`, from VS Code's
   `state.vscdb` + `chatSessions/*.json`), local git commits
-  (`collectors/github.ts`), and macOS Calendar (`collectors/calendar.ts`, from
+  (`collectors/github.ts`), macOS Calendar (`collectors/calendar.ts`, from
   the local `Calendar.sqlitedb` — captures a synced Outlook/Exchange work
-  calendar with no remote API).
+  calendar with no remote API), and ActivityWatch (`collectors/activitywatch.ts`,
+  from the local `aw-server` SQLite → `focus`/`afk`/`edit`/`reading` events; the
+  whole-day time-shape signal, fully local).
 - **Sessionizer** (`src/sessionizer.ts`) — events → ticket-keyed work sessions.
 - **Detectors** (`src/detectors.ts`) — no-LLM seed catalog (repetition, struggle,
-  follow-up habit, AI-cancel, meeting-load) → candidates with evidence + confidence.
+  follow-up habit, AI-cancel, meeting-load, context-switching) → candidates with
+  evidence + confidence.
 - **Daily recap** (`src/recap.ts`) — no-LLM day summary.
 - **Characterizer** (`src/characterizer.ts` + `src/llm.ts`) — local Ollama model
   enriches a candidate into a structured insight and drafts a concrete artifact;
@@ -157,6 +160,7 @@ src/
     copilot.ts         # VS Code / GitHub Copilot chat collector
     github.ts          # local git commit collector
     calendar.ts        # macOS Calendar.sqlitedb → meeting events (Outlook/Exchange)
+    activitywatch.ts   # local aw-server SQLite → focus/afk/edit/reading events
   sessionizer.ts       # events → ticket-keyed work sessions
   detectors.ts         # no-LLM pattern detectors → candidates (the backbone)
   explore.ts           # remote open-ended detector → extra candidates

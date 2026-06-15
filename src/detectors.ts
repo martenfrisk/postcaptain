@@ -219,12 +219,57 @@ export const meetingLoadDetector: Detector = ({ events }) => {
   ];
 };
 
+/**
+ * Context-switching / fragmentation (§6): a high rate of short active-window
+ * episodes means attention is being sliced thin — the enemy of maker time.
+ * Reasons over ActivityWatch `focus` events (one per active-window change).
+ * Tracked as a *lesson* (§7) with switches-per-active-hour as the trend metric
+ * (lower = better), so focus discipline shows improvement over weeks.
+ *
+ * The threshold is an uncalibrated dial (§6) — set against documented behavior,
+ * to be tuned once real ActivityWatch baselines exist.
+ */
+export const contextSwitchDetector: Detector = ({ events }) => {
+  const focus = events
+    .filter((e) => e.kind === "focus")
+    .map((e) => ({ id: e.eventId, sec: Number(e.payload.durationSec ?? 0) }))
+    .filter((f) => f.sec >= 0);
+  if (focus.length < 20) return []; // not enough signal to judge
+
+  const totalSec = focus.reduce((s, f) => s + f.sec, 0);
+  if (totalSec <= 0) return [];
+  const activeHours = totalSec / 3600;
+  const episodes = focus.length;
+  const switchesPerHour = episodes / activeHours;
+  const shortPct = Math.round((focus.filter((f) => f.sec < 60).length / episodes) * 100);
+
+  // Conservative gate (uncalibrated dial): ~a switch every 2 min or faster.
+  if (switchesPerHour < 30) return [];
+
+  const rate = Math.round(switchesPerHour);
+  return [
+    {
+      detector: "context-switching",
+      signature: "context-switching",
+      headline: `Heavy context-switching: ~${rate} window switches/active hour`,
+      whatHappened: `${episodes} focus episodes over ~${activeHours.toFixed(1)}h active; ${shortPct}% were under a minute.`,
+      suggestion: "Batch similar work into time-blocks and mute notifications during a maker slot.",
+      category: "lesson",
+      artifactType: "none",
+      evidence: focus.map((f) => f.id).slice(0, 20),
+      confidence: clamp01(0.4 + (switchesPerHour - 30) / 120),
+      metric: rate,
+    },
+  ];
+};
+
 export const DETECTORS: Detector[] = [
   repetitionDetector,
   struggleDetector,
   followupHabitDetector,
   canceledDetector,
   meetingLoadDetector,
+  contextSwitchDetector,
 ];
 
 /** Run every detector and return candidates, highest confidence first. */

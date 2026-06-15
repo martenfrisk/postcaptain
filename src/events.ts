@@ -19,6 +19,10 @@ export const EVENT_KINDS = [
   "pr_review",
   "meeting",
   "afk",
+  // Active-window focus interval (app + title + duration), from ActivityWatch's
+  // window watcher. The generic time-shape backbone for context-switching (§4/§6);
+  // editor/browser focus arrives as the richer `edit`/`reading` kinds instead.
+  "focus",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
