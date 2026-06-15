@@ -9,6 +9,7 @@
  */
 
 import type { Event } from "./events.ts";
+import { canonicalUrl } from "./kb.ts";
 import type { Session } from "./sessionizer.ts";
 
 export type Category = "shortcut" | "lesson";
@@ -263,6 +264,46 @@ export const contextSwitchDetector: Detector = ({ events }) => {
   ];
 };
 
+/**
+ * Re-research: the same page revisited repeatedly across days → worth a durable
+ * knowledge-base note with your own takeaways (§6/§7). Reasons over `reading`
+ * events (from the AW web watcher / browser history), deduped by canonical URL.
+ */
+export const reResearchDetector: Detector = ({ events }) => {
+  const groups = new Map<string, { ids: string[]; days: Set<number>; title: string }>();
+  for (const e of events) {
+    if (e.kind !== "reading") continue;
+    const url = typeof e.payload.url === "string" ? e.payload.url : "";
+    if (!url) continue;
+    const key = canonicalUrl(url);
+    const title = typeof e.payload.title === "string" ? e.payload.title : "";
+    const g = groups.get(key) ?? { ids: [], days: new Set<number>(), title: "" };
+    g.ids.push(e.eventId);
+    g.days.add(Math.floor(e.ts / DAY_MS));
+    if (title) g.title = title;
+    groups.set(key, g);
+  }
+
+  const out: Candidate[] = [];
+  for (const [key, g] of groups) {
+    if (g.ids.length < 3 || g.days.size < 2) continue;
+    const label = g.title || key;
+    out.push({
+      detector: "re-research",
+      signature: `re-research:${key}`,
+      headline: `Re-read "${truncate(label, 70)}" ${g.ids.length}× across ${g.days.size} days`,
+      whatHappened: `You returned to ${truncate(key, 90)} ${g.ids.length} times over ${g.days.size} days.`,
+      suggestion:
+        "Capture the takeaways once as a knowledge-base note, so you stop re-deriving them.",
+      category: "shortcut",
+      artifactType: "note",
+      evidence: g.ids,
+      confidence: clamp01(0.5 + 0.1 * (g.ids.length - 2)),
+    });
+  }
+  return out;
+};
+
 export const DETECTORS: Detector[] = [
   repetitionDetector,
   struggleDetector,
@@ -270,6 +311,7 @@ export const DETECTORS: Detector[] = [
   canceledDetector,
   meetingLoadDetector,
   contextSwitchDetector,
+  reResearchDetector,
 ];
 
 /** Run every detector and return candidates, highest confidence first. */

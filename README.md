@@ -48,8 +48,11 @@ exploration tier (phase 5).
   whole-day time-shape signal, fully local).
 - **Sessionizer** (`src/sessionizer.ts`) — events → ticket-keyed work sessions.
 - **Detectors** (`src/detectors.ts`) — no-LLM seed catalog (repetition, struggle,
-  follow-up habit, AI-cancel, meeting-load, context-switching) → candidates with
-  evidence + confidence.
+  follow-up habit, AI-cancel, meeting-load, context-switching, re-research) →
+  candidates with evidence + confidence.
+- **Knowledge base** (`src/kb.ts`) — promotes `reading` events into durable notes
+  (canonical-URL dedup + visit counts; `kb_notes`/`kb_links` tables); the
+  consumption side of the design, fed by the AW web watcher or browser history.
 - **Daily recap** (`src/recap.ts`) — no-LLM day summary.
 - **Characterizer** (`src/characterizer.ts` + `src/llm.ts`) — local Ollama model
   enriches a candidate into a structured insight and drafts a concrete artifact;
@@ -169,6 +172,7 @@ src/
   llm.ts               # Ollama client (generate + embeddings) + cosine distance
   recap.ts             # daily recap aggregation
   themes.ts            # longitudinal lessons: lifecycle + ThemeStore (stateful)
+  kb.ts                # knowledge base: reading → notes + KbStore (stateful)
   redact.ts            # tiered §8 redaction gate (secrets always masked)
   synthesis.ts         # weekly digest: local render + remote Copilot synthesis
   usage.ts             # remote-call metering (sizes, purpose, credits)

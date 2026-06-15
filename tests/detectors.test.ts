@@ -7,6 +7,7 @@ import {
   meetingLoadDetector,
   normalizePrompt,
   repetitionDetector,
+  reResearchDetector,
   struggleDetector,
 } from "../src/detectors.ts";
 import { type Event, makeEvent } from "../src/events.ts";
@@ -175,4 +176,39 @@ test("context-switching: calm, sustained focus does not fire", () => {
   expect(contextSwitchDetector({ events: [focus(0, 30), focus(1000, 30)], sessions: [] })).toEqual(
     [],
   );
+});
+
+let rseq = 0;
+function reading(url: string, ts: number, title = ""): Event {
+  return makeEvent({
+    eventId: `r${rseq++}`,
+    kind: "reading",
+    source: "activitywatch",
+    ts,
+    sensitivity: "low",
+    payload: { url, title, durationSec: 60 },
+  });
+}
+
+test("re-research: a page revisited across days (ignoring tracking params) is flagged", () => {
+  const events = [
+    reading("https://pg.dev/indexes?utm_source=hn", 0, "Postgres indexes"),
+    reading("https://pg.dev/indexes", DAY, "Postgres indexes"),
+    reading("https://pg.dev/indexes#gin", 2 * DAY, ""),
+  ];
+  const out = reResearchDetector({ events, sessions: [] });
+  expect(out).toHaveLength(1);
+  expect(out[0]!.detector).toBe("re-research");
+  expect(out[0]!.artifactType).toBe("note");
+  expect(out[0]!.evidence).toHaveLength(3); // all three collapse to one canonical URL
+  expect(out[0]!.signature).toBe("re-research:https://pg.dev/indexes");
+});
+
+test("re-research: same-day-only or too-few revisits are ignored", () => {
+  const sameDay = [
+    reading("https://x.dev/a", 0),
+    reading("https://x.dev/a", 1000),
+    reading("https://x.dev/a", 2000),
+  ];
+  expect(reResearchDetector({ events: sameDay, sessions: [] })).toHaveLength(0);
 });

@@ -47,13 +47,16 @@ collector / screenpipe) and the self-growing exploration tier (phase 5).
   (set at collection time — sensitivity drives all later routing, see §8).
 - **Layout:** `src/` (`events.ts`, `store.ts`, `collectors/`, `sessionizer.ts`,
   `detectors.ts`, `explore.ts` (remote open-ended detector), `characterizer.ts`,
-  `recap.ts`, `themes.ts` (longitudinal lessons), `redact.ts`, `synthesis.ts`,
+  `recap.ts`, `themes.ts` (longitudinal lessons), `kb.ts` (knowledge base —
+  reading → notes), `redact.ts`, `synthesis.ts`,
   `usage.ts`, `dashboard.ts`, `cli.ts`); `tests/` holds
   `*.test.ts` run by `bun test`. Analysis stages (sessionizer, detectors, recap)
-  are pure functions over events — easy to test and re-run. `themes.ts` is the
-  one exception by design: it's the **only stateful stage**, persisting derived
-  lesson state across runs in its own tables (the lifecycle logic stays pure;
-  `ThemeStore` is the thin SQLite wrapper, idempotent per `(theme, week)`).
+  are pure functions over events — easy to test and re-run. `themes.ts` and
+  `kb.ts` are the stateful exceptions by design: they persist derived state
+  across runs in their own tables (lessons; knowledge-base notes). Their logic
+  stays pure (lifecycle / note projection); `ThemeStore`/`KbStore` are thin
+  idempotent SQLite wrappers (per `(theme, week)`; per `note_id` with
+  `visit_count` recomputed, never incremented).
 - **Idempotency:** collectors are re-runnable. Events have a deterministic
   `event_id` derived from the source's natural key; inserts are `OR IGNORE`.
 - **Privacy (tiered, owner-configurable):** the remote redaction level

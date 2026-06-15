@@ -11,6 +11,7 @@
 import type { Candidate } from "./detectors.ts";
 import { detectAll } from "./detectors.ts";
 import type { Event } from "./events.ts";
+import { type KbNote, KbStore } from "./kb.ts";
 import { type DailyRecap, dailyRecap } from "./recap.ts";
 import { type Session, sessionize } from "./sessionizer.ts";
 import { EventStore } from "./store.ts";
@@ -24,6 +25,7 @@ interface Model {
   recap: DailyRecap | null;
   byId: Map<string, Event>;
   lessons: Theme[];
+  notes: KbNote[];
 }
 
 export function buildModel(store: EventStore): Model {
@@ -31,15 +33,19 @@ export function buildModel(store: EventStore): Model {
   const sessions = sessionize(events);
   const candidates = detectAll({ events, sessions });
   const byId = new Map(events.map((e) => [e.eventId, e]));
-  // Tracked lessons live in the same db file (the longitudinal layer, §7).
+  // Tracked lessons and KB notes live in the same db file (§7).
   const themeStore = new ThemeStore(store.path);
+  const kbStore = new KbStore(store.path);
   let lessons: Theme[];
+  let notes: KbNote[];
   try {
     lessons = themeStore.all().filter((t) => t.category === "lesson");
+    notes = kbStore.all();
   } finally {
     themeStore.close();
+    kbStore.close();
   }
-  return { events, sessions, candidates, recap: dailyRecap(events), byId, lessons };
+  return { events, sessions, candidates, recap: dailyRecap(events), byId, lessons, notes };
 }
 
 // ---- formatting & escaping -----------------------------------------------
@@ -381,6 +387,43 @@ function renderLessons(m: Model): string {
   </section>`;
 }
 
+/**
+ * Knowledge base (§7): what's been read, deduped by canonical URL, most-revisited
+ * first. The revisit count is the re-research signal — a high count is a "save a
+ * note" candidate. Summaries/topical work-joins come in the next sub-step.
+ */
+function renderKb(m: Model): string {
+  if (m.notes.length === 0) return "";
+  const rows = m.notes
+    .slice(0, 15)
+    .map((n) => {
+      const label = n.title || n.canonicalUrl;
+      const host = hostOf(n.canonicalUrl);
+      return `<tr>
+        <td class="kb-visits">${num(n.visitCount)}×</td>
+        <td class="kb-title" title="${esc(n.canonicalUrl)}">${esc(truncate(label, 80))}</td>
+        <td class="muted">${esc(host)}</td>
+        <td class="muted ev-when">${esc(isoDay(n.lastSeen))}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <h2>Knowledge base <span class="muted">most revisited</span></h2>
+    <table>
+      <thead><tr><th>visits</th><th>page</th><th>site</th><th>last seen</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </section>`;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 function renderSessions(m: Model): string {
   if (m.sessions.length === 0) return "";
   const rows = [...m.sessions]
@@ -512,6 +555,8 @@ export function renderPage(m: Model): string {
   .lesson-status.new { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
   .lesson-trend { font-variant-numeric: tabular-nums; font-size: 1.05rem; margin-block: .35rem .25rem; }
   .lesson-span { font-size: .82rem; }
+  .kb-visits { font-variant-numeric: tabular-nums; font-weight: 650; color: var(--accent); white-space: nowrap; }
+  .kb-title { font-weight: 500; }
 
   /* evidence */
   table.evidence { inline-size: 100%; border-collapse: collapse; font-size: .85rem; background: color-mix(in srgb, var(--ink) 3%, transparent); border-radius: 8px; }
@@ -542,6 +587,7 @@ export function renderPage(m: Model): string {
   ${renderActivity(m)}
   ${renderFindings(m)}
   ${renderLessons(m)}
+  ${renderKb(m)}
   ${renderAiUsage(m)}
   ${renderRemoteUsage()}
   ${renderSessions(m)}

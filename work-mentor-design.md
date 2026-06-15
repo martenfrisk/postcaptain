@@ -193,7 +193,7 @@ The actual numbers stay data-driven; what's resolved here is the *mechanism* tha
 - **Repetition:** same normalized prompt/command across days → saved prompt, snippet, alias.
 - **Prompt quality:** one-shot vs multi-follow-up ratio by task type → a prompting habit to change.
 - **Abandonment:** AI asked, then done manually anyway → workflow gap, not a prompt gap.
-- **Re-research:** same doc/URL revisited N times → promote to a knowledge-base note.
+- **Re-research:** same doc/URL revisited N times → promote to a knowledge-base note. — *built (`reResearchDetector`): `reading` events deduped by canonical URL, revisited ≥3× across ≥2 days → a "save a note" candidate (`artifact_type: note`).*
 - **Context-switching / fragmentation:** focus churn + meeting interleaving vs completion speed → time-blocking suggestions. — *built (`contextSwitchDetector`): window-switches per active hour over ActivityWatch `focus` events, emitted as a tracked lesson (§7) with the switch-rate as the trend metric. The "meeting interleaving" + "vs completion speed" joins are future enrichments; the rate threshold is an uncalibrated dial pending real AW baselines.*
 - **Meeting load / maker-time:** meeting density vs available focus blocks. — *built (`meetingLoadDetector`): timed meetings (all-day blocks excluded) over a heavy day-rate threshold, emitted as a tracked lesson (§7) with meeting-hours as the trend metric. The fuller "vs available focus blocks" half awaits ActivityWatch focus data.*
 - **AI-first opportunities:** recurring multi-step Jira→branch→PR or MCP sequences → draft a tailored agent/command (see §7).
@@ -260,6 +260,8 @@ CREATE TABLE kb_links (
 ```
 
 A reading event is promoted to a note on first sight; revisits bump `last_seen`/`visit_count`. When `visit_count` crosses the re-research threshold (§6 seed catalog), the note is surfaced as a "promote to knowledge-base note" candidate.
+
+**Implemented (2026-06-15):** `kb.ts` + `KbStore` (`kb_notes`/`kb_links` tables). Notes are a *pure projection* of `reading` events deduped by canonical URL (`canonicalUrl` strips fragments + tracking params); `visit_count` is recomputed, not incremented, so re-running capture is idempotent. Re-promotion preserves any existing `summary`/`tags`/`embedding`. Capture promotes reading events automatically; the dashboard shows a most-revisited panel; the `reResearchDetector` reads the same events. **Still pending (next sub-step):** local summarization + embeddings, and the `kb_links` consumption↔work join (temporal + topical proximity) — `kb_links` is created but not yet populated.
 
 #### The consumption↔work join (resolved)
 
@@ -385,9 +387,10 @@ Cap screenpipe's disk usage in its own settings as a backstop.
    `theme_observations` tables) and runs the §7 lifecycle (`new → active →
    improving → regressed → resolved → dormant`) with a trend; lessons surface in
    the `digest`/dashboard only on material change, and `postcaptain lessons`
-   lists the tracked trends. The knowledge-base half (`kb_notes`/`kb_links`)
-   stays pending — it's blocked on a `reading` collector (screenpipe), not on
-   this layer.*
+   lists the tracked trends. The knowledge-base foundation (`kb_notes` + `kb.ts`
+   + re-research detector) is built too, fed by `reading` events from the AW web
+   watcher / browser history (no screenpipe needed); local summaries/embeddings
+   and the `kb_links` consumption↔work join are the remaining sub-step.*
 5. **Exploration tier:** self-grown detectors + anti-Clippy gates. — *pending
    (the remote open-ended detector in `explore.ts` is a first cut; promoting its
    hypotheses into tracked detectors, plus the embedding/cosine novelty gate via

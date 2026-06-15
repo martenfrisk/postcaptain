@@ -18,6 +18,7 @@ import * as github from "./collectors/github.ts";
 import { type Candidate, detectAll } from "./detectors.ts";
 import type { Event } from "./events.ts";
 import { exploreCandidates } from "./explore.ts";
+import { KbStore } from "./kb.ts";
 import { ollamaClient } from "./llm.ts";
 import { answer } from "./query.ts";
 import {
@@ -57,6 +58,18 @@ async function capture(dbPath: string): Promise<number> {
       `activitywatch: +${awAdded} new focus/afk/edit/reading events ` +
         `(${store.count("focus")} focus, ${store.count("afk")} afk total)`,
     );
+    // Promote reading events into durable knowledge-base notes (§7). Idempotent:
+    // notes are a pure projection of reading events (visit_count recomputed).
+    const reading = store.query({ kind: "reading" });
+    if (reading.length > 0) {
+      const kb = new KbStore(dbPath);
+      try {
+        kb.promote(reading);
+        console.log(`kb:      ${kb.count()} notes from ${reading.length} reading events`);
+      } finally {
+        kb.close();
+      }
+    }
     console.log(`→ ${dbPath}`);
   } finally {
     store.close();
