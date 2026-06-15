@@ -13,13 +13,28 @@ import { parseArgs } from "node:util";
 import { characterizeAll } from "./characterizer.ts";
 import * as copilot from "./collectors/copilot.ts";
 import * as github from "./collectors/github.ts";
-import { detectAll } from "./detectors.ts";
+import { type Candidate, detectAll } from "./detectors.ts";
+import { exploreCandidates } from "./explore.ts";
 import { ollamaClient } from "./llm.ts";
 import { answer } from "./query.ts";
-import { loadDenylist, loadOrCreateSalt, RedactionError } from "./redact.ts";
+import {
+  asLevel,
+  loadDenylist,
+  loadOrCreateSalt,
+  loadRedactionLevel,
+  RedactionError,
+} from "./redact.ts";
 import { sessionize } from "./sessionizer.ts";
 import { EventStore } from "./store.ts";
-import { buildDigestInput, copilotRunner, previewText, synthesize } from "./synthesis.ts";
+import {
+  buildDigestInput,
+  copilotRunner,
+  localDigest,
+  previewText,
+  synthesize,
+  weekRange,
+} from "./synthesis.ts";
+import { readUsage, summarizeUsage } from "./usage.ts";
 
 async function capture(dbPath: string): Promise<number> {
   const store = new EventStore(dbPath);
@@ -51,6 +66,18 @@ function stats(dbPath: string): number {
     console.log("  by model:    ", topN(byModel, 5));
   } finally {
     store.close();
+  }
+
+  const usage = summarizeUsage(readUsage());
+  if (usage.calls > 0) {
+    const credits =
+      usage.creditsKnown > 0
+        ? `~${usage.credits.toFixed(1)} credits (${usage.creditsKnown}/${usage.calls} reported)`
+        : "credits not reported";
+    console.log(
+      `remote calls: ${usage.calls} (${JSON.stringify(usage.byPurpose)}), ` +
+        `~${usage.promptTokensEst + usage.responseTokensEst} est. tokens, ${credits}`,
+    );
   }
   return 0;
 }
@@ -129,7 +156,7 @@ async function digest(
   localModel: string,
   remoteModel: string,
   minConfidence: number,
-  opts: { send: boolean; week?: string },
+  opts: { send: boolean; explore: boolean; week?: string; redact?: string },
 ): Promise<number> {
   const store = new EventStore(dbPath);
   let events: ReturnType<EventStore["query"]>;
@@ -141,10 +168,27 @@ async function digest(
 
   const denylist = loadDenylist();
   const salt = loadOrCreateSalt();
+  const level = opts.redact ? asLevel(opts.redact) : loadRedactionLevel();
   const day = opts.week ? new Date(opts.week) : undefined;
   if (day && Number.isNaN(day.getTime())) {
     console.error(`invalid --week date: ${opts.week} (use YYYY-MM-DD)`);
     return 2;
+  }
+
+  // Open-ended detector (remote): widen the net beyond the deterministic catalog.
+  // It's a remote call, so it only runs on explicit opt-in (--explore).
+  let extraCandidates: Candidate[] = [];
+  if (opts.explore) {
+    const week = weekRange(day);
+    const inWeek = events.filter((e) => e.ts >= week.startTs && e.ts < week.endTs);
+    console.log(`→ open-ended detection on Copilot CLI (model: ${remoteModel})…`);
+    extraCandidates = await exploreCandidates(inWeek, copilotRunner("explore"), {
+      denylist,
+      salt,
+      level,
+      model: remoteModel,
+    });
+    console.log(`  ${extraCandidates.length} additional candidate(s) found\n`);
   }
 
   let input: Awaited<ReturnType<typeof buildDigestInput>>;
@@ -152,6 +196,8 @@ async function digest(
     input = await buildDigestInput(events, ollamaClient({ model: localModel }), denylist, salt, {
       day,
       minConfidence,
+      level,
+      extraCandidates,
     });
   } catch (err) {
     if (err instanceof RedactionError) {
@@ -161,19 +207,21 @@ async function digest(
     throw err;
   }
 
-  console.log(previewText(input));
+  // The always-available local digest, then the exact would-be-sent payload.
+  console.log(localDigest(input));
+  console.log(`\n${previewText(input)}`);
 
   if (input.redacted.length === 0) {
     console.log("\nNo findings for this week above the confidence bar — nothing to send.");
     return 0;
   }
   if (!opts.send) {
-    console.log("\n(preview only — re-run with --send to make the remote Copilot CLI call)");
+    console.log("\n(local digest above — re-run with --send for the remote synthesis)");
     return 0;
   }
 
-  console.log(`\n→ sending to Copilot CLI (model: ${remoteModel})…\n`);
-  const result = await synthesize(input, copilotRunner(), remoteModel);
+  console.log(`\n→ synthesizing on Copilot CLI (model: ${remoteModel})…\n`);
+  const result = await synthesize(input, copilotRunner("digest"), remoteModel);
   console.log(result.digest ?? "(no digest returned)");
   return 0;
 }
@@ -196,6 +244,8 @@ export async function main(argv: string[]): Promise<number> {
       "remote-model": { type: "string", default: "auto" },
       "min-confidence": { type: "string", default: "0.6" },
       send: { type: "boolean", default: false },
+      explore: { type: "boolean", default: false },
+      redact: { type: "string" },
       week: { type: "string" },
     },
     allowPositionals: true,
@@ -217,13 +267,18 @@ export async function main(argv: string[]): Promise<number> {
         values.model as string,
         values["remote-model"] as string,
         Number(values["min-confidence"]),
-        { send: values.send as boolean, week: values.week as string | undefined },
+        {
+          send: values.send as boolean,
+          explore: values.explore as boolean,
+          week: values.week as string | undefined,
+          redact: values.redact as string | undefined,
+        },
       );
     case "serve":
       return await serve(dbPath, Number(values.port));
     default:
       console.error(
-        'usage: postcaptain <capture|stats|insights|ask "q"|digest|serve> [--db PATH] [--port N] [--model M] [--remote-model M] [--min-confidence C] [--week YYYY-MM-DD] [--send]',
+        'usage: postcaptain <capture|stats|insights|ask "q"|digest|serve> [--db PATH] [--port N] [--model M] [--remote-model M] [--min-confidence C] [--redact strict|identifiers|raw] [--explore] [--week YYYY-MM-DD] [--send]',
       );
       return 2;
   }

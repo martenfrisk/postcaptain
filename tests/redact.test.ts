@@ -31,6 +31,23 @@ test("strips fenced code blocks and inline code", () => {
   expect(out).not.toContain("inline()");
 });
 
+test("the generic high-entropy rule spares long kebab-case slugs but catches real tokens", () => {
+  // a 37-char lowercase slug is prose, not a secret — must survive
+  const slug = redactText(
+    "signature explore:establish-secure-ci-debugging-pattern",
+    EMPTY_DENYLIST,
+    SALT,
+  );
+  expect(slug).toContain("establish-secure-ci-debugging-pattern");
+  // a 40-char mixed-case/digit token is high-entropy — must be masked
+  const token = redactText(
+    "token aB3xQ9zL5kP2mN7wR4tY8uV1cD6eF0gH2jK5lM9n here",
+    EMPTY_DENYLIST,
+    SALT,
+  );
+  expect(token).toContain("[secret]");
+});
+
 test("masks secret shapes", () => {
   const out = redactText(
     "key AKIAIOSFODNN7EXAMPLE and token ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD and API_KEY=supersecretvalue",
@@ -43,10 +60,10 @@ test("masks secret shapes", () => {
   expect(out).toContain("[secret]");
 });
 
-test("pseudonymizes emails, tickets, and denylist literals (stable + one-way)", () => {
+test("pseudonymizes emails, tickets, and denylist literals (strict, stable + one-way)", () => {
   const text =
     "Jane Doe (jane@example-corp.com) pushed to example-corp/checkout-service for ABC-123";
-  const out = redactText(text, denylist, SALT);
+  const out = redactText(text, denylist, SALT, "strict");
   expect(out).not.toContain("jane@example-corp.com");
   expect(out).not.toContain("example-corp");
   expect(out).not.toContain("checkout-service");
@@ -57,18 +74,21 @@ test("pseudonymizes emails, tickets, and denylist literals (stable + one-way)", 
   expect(out).toMatch(/ticket:[0-9a-f]{4}/);
 
   // stable: same value → same token across calls
-  expect(redactText("ABC-123", denylist, SALT)).toBe(redactText("ABC-123", denylist, SALT));
+  expect(redactText("ABC-123", denylist, SALT, "strict")).toBe(
+    redactText("ABC-123", denylist, SALT, "strict"),
+  );
   // salt-dependent (one-way, not reversible without the salt)
-  expect(redactText("ABC-123", denylist, "other-salt")).not.toBe(
-    redactText("ABC-123", denylist, SALT),
+  expect(redactText("ABC-123", denylist, "other-salt", "strict")).not.toBe(
+    redactText("ABC-123", denylist, SALT, "strict"),
   );
 });
 
-test("keeps public doc URLs but pseudonymizes internal/file URLs", () => {
+test("keeps public doc URLs but pseudonymizes internal/file URLs (strict)", () => {
   const out = redactText(
     "docs at https://developer.mozilla.org/en-US/docs vs https://jira.example-corp.com/browse/ABC-1 and file:///Users/me/secret.txt",
     denylist,
     SALT,
+    "strict",
   );
   expect(out).toContain("https://developer.mozilla.org/en-US/docs");
   expect(out).not.toContain("jira.example-corp.com");
@@ -76,19 +96,61 @@ test("keeps public doc URLs but pseudonymizes internal/file URLs", () => {
   expect(out).toMatch(/url:[0-9a-f]{4}/);
 });
 
-test("pseudonymizes absolute filesystem paths", () => {
-  const out = redactText("edited /Users/marten/work/repo/src/index.ts today", EMPTY_DENYLIST, SALT);
+test("pseudonymizes absolute filesystem paths (strict)", () => {
+  const out = redactText(
+    "edited /Users/marten/work/repo/src/index.ts today",
+    EMPTY_DENYLIST,
+    SALT,
+    "strict",
+  );
   expect(out).not.toContain("/Users/marten/work/repo/src/index.ts");
   expect(out).toMatch(/path:[0-9a-f]{4}/);
 });
 
-test("assertClean throws when a denylist literal survives (fail-closed)", () => {
-  expect(() => assertClean("leaked example-corp.com here", denylist)).toThrow(RedactionError);
-  expect(() => assertClean("nothing identifying here", denylist)).not.toThrow();
+// --- tiers -------------------------------------------------------------------
+
+test("identifiers tier: keeps names + strips code, but still masks secrets", () => {
+  const out = redactText(
+    "deploy checkout-service for ABC-123 with AWS_KEY=AKIAIOSFODNN7EXAMPLE and `npm run x`",
+    denylist,
+    SALT,
+    "identifiers",
+  );
+  // identifiers stay readable (the point of relaxing)
+  expect(out).toContain("checkout-service");
+  expect(out).toContain("ABC-123");
+  // ...but code is stripped and secrets are still masked
+  expect(out).toContain("[code]");
+  expect(out).toContain("[secret]");
+  expect(out).not.toContain("AKIAIOSFODNN7EXAMPLE");
 });
 
-test("assertClean throws when a hard secret shape survives", () => {
-  expect(() => assertClean("AKIAIOSFODNN7EXAMPLE", EMPTY_DENYLIST)).toThrow(RedactionError);
+test("raw tier: keeps verbatim code + names, but STILL masks secrets", () => {
+  const out = redactText(
+    "see ```\nconst k = 'AKIAIOSFODNN7EXAMPLE'\n``` in checkout-service",
+    denylist,
+    SALT,
+    "raw",
+  );
+  expect(out).toContain("const k ="); // verbatim code kept
+  expect(out).toContain("checkout-service"); // identifier kept
+  expect(out).not.toContain("AKIAIOSFODNN7EXAMPLE"); // credential never survives
+  expect(out).toContain("[secret]");
+});
+
+test("assertClean: denylist check only at strict; secret check at EVERY tier", () => {
+  // denylist literal is allowed through at relaxed tiers...
+  expect(() => assertClean("leaked example-corp.com here", denylist, "identifiers")).not.toThrow();
+  // ...but flagged at strict
+  expect(() => assertClean("leaked example-corp.com here", denylist, "strict")).toThrow(
+    RedactionError,
+  );
+  // a surviving credential is fail-closed regardless of tier
+  for (const level of ["strict", "identifiers", "raw"] as const) {
+    expect(() => assertClean("AKIAIOSFODNN7EXAMPLE", EMPTY_DENYLIST, level)).toThrow(
+      RedactionError,
+    );
+  }
 });
 
 function insight(over: Partial<Insight> = {}): Insight {
@@ -108,8 +170,8 @@ function insight(over: Partial<Insight> = {}): Insight {
   };
 }
 
-test("redactInsight scrubs every text field and reduces evidence to a count", () => {
-  const r = redactInsight(insight(), denylist, SALT);
+test("redactInsight (strict) scrubs every text field and reduces evidence to a count", () => {
+  const r = redactInsight(insight(), denylist, SALT, "strict");
   const blob = JSON.stringify(r);
   expect(blob).not.toContain("checkout-service");
   expect(blob).not.toContain("example-corp");

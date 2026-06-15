@@ -1,17 +1,53 @@
 import { expect, test } from "bun:test";
 import { type Event, type EventKind, makeEvent } from "../src/events.ts";
 import type { LlmClient } from "../src/llm.ts";
-import { EMPTY_DENYLIST } from "../src/redact.ts";
+import { EMPTY_DENYLIST, type RedactedInsight } from "../src/redact.ts";
 import {
   buildDigestInput,
   buildSynthesisPrompt,
   type CopilotRunner,
+  type DigestInput,
   previewText,
   synthesize,
+  type WeekStats,
   weekRange,
 } from "../src/synthesis.ts";
 
 const SALT = "test-salt";
+
+const ZERO_STATS: WeekStats = {
+  aiInteractions: 0,
+  canceled: 0,
+  commits: 0,
+  promptTokensEst: 0,
+  responseTokensEst: 0,
+  projects: 0,
+  tickets: 0,
+};
+
+const SAMPLE_REDACTED: RedactedInsight = {
+  detector: "repetition",
+  signature: "s",
+  headline: "h",
+  whatHappened: "w",
+  suggestion: "sg",
+  category: "shortcut",
+  artifactType: "snippet",
+  artifactDraft: "d",
+  confidence: 0.8,
+  evidenceCount: 3,
+};
+
+function mkInput(over: Partial<DigestInput> = {}): DigestInput {
+  return {
+    week: weekRange(new Date("2026-06-17T12:00:00Z")),
+    level: "identifiers",
+    stats: ZERO_STATS,
+    insights: [],
+    redacted: [SAMPLE_REDACTED],
+    ...over,
+  };
+}
 
 let seq = 0;
 function ev(kind: EventKind, ts: number, payload: Record<string, unknown>, ticket?: string): Event {
@@ -74,55 +110,22 @@ test("buildDigestInput filters to the week, characterizes locally, and redacts",
   expect(input.redacted[0]).not.toHaveProperty("evidence");
 });
 
-test("buildSynthesisPrompt embeds the redacted payload and forbids tool use", () => {
-  const p = buildSynthesisPrompt([
-    {
-      detector: "repetition",
-      signature: "s",
-      headline: "h",
-      whatHappened: "w",
-      suggestion: "sg",
-      category: "shortcut",
-      artifactType: "snippet",
-      artifactDraft: "d",
-      confidence: 0.8,
-      evidenceCount: 3,
-    },
-  ]);
+test("buildSynthesisPrompt embeds stats + the redacted payload and forbids tool use", () => {
+  const p = buildSynthesisPrompt(mkInput({ stats: { ...ZERO_STATS, aiInteractions: 12 } }));
   expect(p).toContain("WEEKLY work digest");
   expect(p).toContain("Do not use any tools");
   expect(p).toContain('"detector": "repetition"');
+  expect(p).toContain("STATS:");
+  expect(p).toContain('"aiInteractions": 12');
 });
 
 test("synthesize calls the runner with the redacted prompt and returns the digest", async () => {
-  const w = weekRange();
   let seen = "";
   const runner: CopilotRunner = async (prompt, model) => {
     seen = `${model}::${prompt}`;
     return "## Top insights\n- do the thing";
   };
-  const result = await synthesize(
-    {
-      week: w,
-      insights: [],
-      redacted: [
-        {
-          detector: "repetition",
-          signature: "s",
-          headline: "h",
-          whatHappened: "w",
-          suggestion: "sg",
-          category: "shortcut",
-          artifactType: "snippet",
-          artifactDraft: "d",
-          confidence: 0.8,
-          evidenceCount: 3,
-        },
-      ],
-    },
-    runner,
-    "auto",
-  );
+  const result = await synthesize(mkInput(), runner, "auto");
   expect(result.sent).toBe(true);
   expect(result.digest).toContain("Top insights");
   expect(seen).toContain("auto::");
@@ -135,35 +138,15 @@ test("synthesize does NOT call the runner when there are no insights", async () 
     called = true;
     return "should not happen";
   };
-  const result = await synthesize(
-    { week: weekRange(), insights: [], redacted: [] },
-    runner,
-    "auto",
-  );
+  const result = await synthesize(mkInput({ redacted: [] }), runner, "auto");
   expect(called).toBe(false);
   expect(result.sent).toBe(false);
 });
 
-test("previewText shows the week and the exact payload to be sent", () => {
-  const preview = previewText({
-    week: weekRange(new Date("2026-06-17T12:00:00Z")),
-    insights: [],
-    redacted: [
-      {
-        detector: "repetition",
-        signature: "s",
-        headline: "h",
-        whatHappened: "w",
-        suggestion: "sg",
-        category: "shortcut",
-        artifactType: "snippet",
-        artifactDraft: "d",
-        confidence: 0.8,
-        evidenceCount: 3,
-      },
-    ],
-  });
+test("previewText shows the week, the tier, and the exact payload to be sent", () => {
+  const preview = previewText(mkInput());
   expect(preview).toContain("Week: 2026-06-15 — 2026-06-21");
+  expect(preview).toContain("Redaction tier: identifiers");
   expect(preview).toContain("what would be sent");
   expect(preview).toContain('"detector": "repetition"');
 });

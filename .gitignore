@@ -19,3 +19,6 @@ redaction.toml
 # Local HMAC salt for redaction pseudonyms — must never leave the machine
 .postcaptain.salt
 *.salt
+
+# Local remote-call usage log
+.postcaptain-usage.jsonl

@@ -44,6 +44,34 @@ export const EMPTY_DENYLIST: Denylist = {
   people: [],
 };
 
+/**
+ * How much to strip before text goes remote. Secret masking (credentials) is
+ * **always on at every tier** — a leaked key is never an insight. The tiers
+ * only govern how aggressively *identifiers* and *code* are abstracted:
+ *
+ *   - `strict`       — full §8: strip code, mask secrets, pseudonymize every
+ *                      identifier (emails/URLs/tickets/denylist/paths).
+ *   - `identifiers`  — strip code + mask secrets, but keep identifiers readable
+ *                      (repo/ticket/host/path names pass through). Default.
+ *   - `raw`          — mask secrets only; keep verbatim prompts/code + identifiers.
+ *
+ * Relaxing past `strict` is a deliberate choice (the owner already shares this
+ * code with the remote model day-to-day); secret masking and the fail-closed
+ * secret-shape self-check still run regardless of tier.
+ */
+export type RedactionLevel = "strict" | "identifiers" | "raw";
+
+export const DEFAULT_LEVEL: RedactionLevel = "identifiers";
+
+const LEVELS: RedactionLevel[] = ["strict", "identifiers", "raw"];
+
+/** Coerce arbitrary input (flag/config) to a valid level, falling back to default. */
+export function asLevel(value: unknown): RedactionLevel {
+  return typeof value === "string" && (LEVELS as string[]).includes(value)
+    ? (value as RedactionLevel)
+    : DEFAULT_LEVEL;
+}
+
 /** Thrown when the fail-closed self-check finds a leak survived the pipeline. */
 export class RedactionError extends Error {
   constructor(message: string) {
@@ -81,6 +109,22 @@ export function loadDenylist(path = "./redaction.toml"): Denylist {
   };
 }
 
+/** Parse one `key = "value"` scalar string out of the tiny TOML file. */
+function tomlString(text: string, key: string): string | undefined {
+  const m = text.match(new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']*)["']`, "m"));
+  return m?.[1];
+}
+
+/**
+ * Load the configured default redaction level from `redaction.toml`
+ * (`level = "identifiers"`). Falls back to {@link DEFAULT_LEVEL} if unset/absent.
+ * A CLI `--redact` flag is expected to override this.
+ */
+export function loadRedactionLevel(path = "./redaction.toml"): RedactionLevel {
+  if (!existsSync(path)) return DEFAULT_LEVEL;
+  return asLevel(tomlString(readFileSync(path, "utf8"), "level"));
+}
+
 /**
  * Load the local HMAC salt, creating it once if absent. The salt never leaves
  * the machine; losing it only breaks cross-week pseudonym stability.
@@ -114,7 +158,10 @@ const SECRET_PATTERNS: RegExp[] = [
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/g, // PEM private key header
   /\b[A-Z][A-Z0-9_]{2,}\s*=\s*\S+/g, // KEY=value / .env lines
-  /\b[A-Za-z0-9_-]{32,}\b/g, // generic high-entropy token
+  // generic high-entropy token — the lookahead requires a digit or uppercase so
+  // long lowercase kebab-case slugs/prose ("establish-secure-ci-pattern") aren't
+  // mistaken for secrets; real tokens (base64/hex) carry digits or mixed case.
+  /\b(?=[A-Za-z0-9_-]*[0-9A-Z])[A-Za-z0-9_-]{32,}\b/g,
 ];
 
 const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
@@ -144,45 +191,56 @@ function isPublicUrl(url: string, denyHosts: Set<string>): boolean {
  * Redact one string through the ordered pipeline. Pure and deterministic given
  * the same salt + denylist.
  */
-export function redactText(input: string, denylist: Denylist, salt: string): string {
+export function redactText(
+  input: string,
+  denylist: Denylist,
+  salt: string,
+  level: RedactionLevel = DEFAULT_LEVEL,
+): string {
   let s = input;
 
-  // 1. Strip code & verbatim blocks (backstop against a leaked snippet).
-  s = s.replace(/```[\s\S]*?```/g, (block) => {
-    const lines = block.split("\n").length - 1;
-    return `[code: ${lines} lines]`;
-  });
-  s = s.replace(/`[^`\n]+`/g, "[code]");
+  // 1. Strip code & verbatim blocks (backstop against a leaked snippet) — kept
+  //    verbatim only at the `raw` tier.
+  if (level !== "raw") {
+    s = s.replace(/```[\s\S]*?```/g, (block) => {
+      const lines = block.split("\n").length - 1;
+      return `[code: ${lines} lines]`;
+    });
+    s = s.replace(/`[^`\n]+`/g, "[code]");
+  }
 
-  // 2. Mask secrets.
+  // 2. Mask secrets — ALWAYS, every tier. A leaked credential is never useful.
   for (const re of SECRET_PATTERNS) s = s.replace(re, "[secret]");
 
-  // 3. Pseudonymize identifiers (emails → URLs → tickets → denylist literals).
-  s = s.replace(EMAIL_RE, (m) => pseudonym("user", m, salt));
+  // 3. Pseudonymize identifiers — only at `strict`. `identifiers`/`raw` keep
+  //    repo/ticket/host/path names readable (that's the point of relaxing).
+  if (level === "strict") {
+    s = s.replace(EMAIL_RE, (m) => pseudonym("user", m, salt));
 
-  // Public doc URLs may pass (reading is low-sensitivity); pseudonymize
-  // internal/file URLs outright. PATH_RE's lookbehind leaves kept URLs intact.
-  const denyHosts = new Set(
-    [...denylist.companyDomains, ...denylist.internalHosts].map((h) => h.toLowerCase()),
-  );
-  s = s.replace(URL_RE, (m) => (isPublicUrl(m, denyHosts) ? m : pseudonym("url", m, salt)));
-  s = s.replace(TICKET_RE, (m) => pseudonym("ticket", m, salt));
+    // Public doc URLs may pass (reading is low-sensitivity); pseudonymize
+    // internal/file URLs outright. PATH_RE's lookbehind leaves kept URLs intact.
+    const denyHosts = new Set(
+      [...denylist.companyDomains, ...denylist.internalHosts].map((h) => h.toLowerCase()),
+    );
+    s = s.replace(URL_RE, (m) => (isPublicUrl(m, denyHosts) ? m : pseudonym("url", m, salt)));
+    s = s.replace(TICKET_RE, (m) => pseudonym("ticket", m, salt));
 
-  // Denylist literals — force-pseudonymized even if a generic rule missed them.
-  const literal = (values: string[], type: string) => {
-    for (const v of values) {
-      if (!v.trim()) continue;
-      s = s.replace(new RegExp(escapeRe(v), "gi"), pseudonym(type, v, salt));
-    }
-  };
-  literal(denylist.companyDomains, "host");
-  literal(denylist.internalHosts, "host");
-  literal(denylist.repoOrgs, "repo");
-  literal(denylist.repoNames, "repo");
-  literal(denylist.people, "user");
+    // Denylist literals — force-pseudonymized even if a generic rule missed them.
+    const literal = (values: string[], type: string) => {
+      for (const v of values) {
+        if (!v.trim()) continue;
+        s = s.replace(new RegExp(escapeRe(v), "gi"), pseudonym(type, v, salt));
+      }
+    };
+    literal(denylist.companyDomains, "host");
+    literal(denylist.internalHosts, "host");
+    literal(denylist.repoOrgs, "repo");
+    literal(denylist.repoNames, "repo");
+    literal(denylist.people, "user");
 
-  // 4. Drop residual absolute paths.
-  s = s.replace(PATH_RE, (m) => pseudonym("path", m, salt));
+    // 4. Drop residual absolute paths.
+    s = s.replace(PATH_RE, (m) => pseudonym("path", m, salt));
+  }
 
   return s;
 }
@@ -191,15 +249,25 @@ export function redactText(input: string, denylist: Denylist, salt: string): str
  * Fail-closed self-check (§8): assert no denylist literal and no obvious secret
  * shape survived. Throws {@link RedactionError} if a leak is found.
  */
-export function assertClean(redacted: string, denylist: Denylist): void {
-  const haystack = redacted.toLowerCase();
-  for (const lit of denylistLiterals(denylist)) {
-    if (haystack.includes(lit.toLowerCase())) {
-      throw new RedactionError(`denylist literal survived redaction: "${lit}"`);
+export function assertClean(
+  redacted: string,
+  denylist: Denylist,
+  level: RedactionLevel = DEFAULT_LEVEL,
+): void {
+  // The denylist-literal check only applies at `strict`, where we pseudonymize
+  // those names; `identifiers`/`raw` intentionally let them through.
+  if (level === "strict") {
+    const haystack = redacted.toLowerCase();
+    for (const lit of denylistLiterals(denylist)) {
+      if (haystack.includes(lit.toLowerCase())) {
+        throw new RedactionError(`denylist literal survived redaction: "${lit}"`);
+      }
     }
   }
-  // The generic KEY=value rule is too broad to re-assert (it would flag the
-  // pseudonyms themselves), so re-check only the unambiguous secret shapes.
+  // Secret-shape check is fail-closed at EVERY tier — a credential must never
+  // leave, no matter how relaxed the identifier policy. The generic KEY=value
+  // rule is too broad to re-assert (it would flag pseudonyms), so re-check only
+  // the unambiguous shapes.
   const hardShapes = SECRET_PATTERNS.slice(0, 4);
   for (const re of hardShapes) {
     re.lastIndex = 0;
@@ -227,10 +295,15 @@ export interface RedactedInsight {
 }
 
 /** Redact one insight, running every text field through the pipeline + self-check. */
-export function redactInsight(insight: Insight, denylist: Denylist, salt: string): RedactedInsight {
+export function redactInsight(
+  insight: Insight,
+  denylist: Denylist,
+  salt: string,
+  level: RedactionLevel = DEFAULT_LEVEL,
+): RedactedInsight {
   const clean = (field: string): string => {
-    const out = redactText(field, denylist, salt);
-    assertClean(out, denylist);
+    const out = redactText(field, denylist, salt, level);
+    assertClean(out, denylist, level);
     return out;
   };
   return {
@@ -252,6 +325,7 @@ export function redactInsights(
   insights: Insight[],
   denylist: Denylist,
   salt: string,
+  level: RedactionLevel = DEFAULT_LEVEL,
 ): RedactedInsight[] {
-  return insights.map((i) => redactInsight(i, denylist, salt));
+  return insights.map((i) => redactInsight(i, denylist, salt, level));
 }

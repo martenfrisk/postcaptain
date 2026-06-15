@@ -20,8 +20,10 @@ characterize → recap → dashboard**, plus interactive **`ask`**. Collectors:
 Copilot chat + local git commits. The model layers (`characterizer.ts`,
 `query.ts`, `llm.ts`) run on a local Ollama model (default `llama3.2:latest`)
 via the `insights` and `ask` commands; both fall back gracefully if Ollama is
-down. Still pending: the weekly *remote* synthesis (needs Copilot CLI, which is
-not installed here), themes/lessons (phase 4), and the exploration tier (5).
+down. The weekly *remote* synthesis (`digest`, via GitHub Copilot CLI) and the
+remote open-ended detector (`explore.ts`, `digest --explore`) are built and
+metered (`usage.ts`). Still pending: themes/lessons (phase 4) and deeper
+longitudinal synthesis (phase 5).
 
 ## Stack & conventions
 
@@ -32,14 +34,23 @@ not installed here), themes/lessons (phase 4), and the exploration tier (5).
   `payload` per kind. Each event carries `project`, `ticket`, `sensitivity`
   (set at collection time — sensitivity drives all later routing, see §8).
 - **Layout:** `src/` (`events.ts`, `store.ts`, `collectors/`, `sessionizer.ts`,
-  `detectors.ts`, `recap.ts`, `dashboard.ts`, `cli.ts`); `tests/` holds
+  `detectors.ts`, `explore.ts` (remote open-ended detector), `characterizer.ts`,
+  `recap.ts`, `redact.ts`, `synthesis.ts`, `usage.ts`, `dashboard.ts`,
+  `cli.ts`); `tests/` holds
   `*.test.ts` run by `bun test`. Analysis stages (sessionizer, detectors, recap)
   are pure functions over events — easy to test and re-run.
 - **Idempotency:** collectors are re-runnable. Events have a deterministic
   `event_id` derived from the source's natural key; inserts are `OR IGNORE`.
-- **Privacy:** raw prompts/code never leave the machine. Copilot/GitHub/Jira
-  events are `sensitive`. Only redacted, abstracted insights are remote-eligible.
-  Do not add code that ships raw payloads anywhere.
+- **Privacy (tiered, owner-configurable):** the remote redaction level
+  (`redact.ts`) is a setting — `strict` (full §8 pseudonymization), `identifiers`
+  (default; repo/ticket/host/path names readable), or `raw` (verbatim
+  prompts/code). Set it in `redaction.toml` (`level = "..."`) or per-run via
+  `--redact`. **Invariant that holds at every tier:** credential/secret masking
+  is always on, and the fail-closed secret-shape self-check (`assertClean`) runs
+  regardless of tier — a leaked key must never go remote. The denylist-literal
+  check only applies at `strict`. When adding code that sends data remote, route
+  text through `redactText`/`assertClean` at the active level; never bypass the
+  secret masking.
 
 ### Domain keys (design §5/§12)
 

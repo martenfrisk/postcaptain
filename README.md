@@ -9,9 +9,10 @@ weekly digest, and an ad-hoc query interface, delivered like a senior developer
 who sits nearby. The strategic focus is **how AI is used, and how to use it
 better**, as development goes AI-first.
 
-It is explicitly **not** a dashboard or a data lake. Raw code, prompts, responses
-and meeting content never leave the machine; only redacted, abstracted insights
-are ever eligible for a remote model call.
+It is explicitly **not** a dashboard or a data lake. What leaves the machine is
+governed by a configurable **redaction tier** (default: identifiers readable,
+code stripped) — and **secrets are masked at every tier**, fail-closed, so a
+credential never goes remote no matter the setting.
 
 See [`work-mentor-design.md`](work-mentor-design.md) for the full design.
 
@@ -19,11 +20,14 @@ See [`work-mentor-design.md`](work-mentor-design.md) for the full design.
 
 The pipeline is working end-to-end:
 **capture → sessionize → detect → characterize → recap → dashboard**, plus
-**interactive `ask`** and the **weekly `digest`** — the one remote call, through
-GitHub Copilot CLI, behind the redaction gate (§8). The local model layers run
-on Ollama; the remote synthesis runs on whatever model your Copilot plan exposes
-(`auto` by default — no premium model required). Still pending: themes/lessons
-(phase 4) and the exploration tier (phase 5).
+**interactive `ask`** and the **weekly `digest`**. Remote calls go through GitHub
+Copilot CLI behind a tiered redaction gate (§8): the **weekly synthesis** and an
+**open-ended detector** (`--explore`) that hands a redacted week to a strong
+model to surface patterns the fixed detector catalog misses. The local layers
+run on Ollama; the remote stages run on whatever model your Copilot plan exposes
+(`auto` by default). Every remote call is **metered** (`stats` + dashboard).
+Still pending: themes/lessons (phase 4) and deeper longitudinal synthesis
+(phase 5).
 
 ### Done so far
 
@@ -45,12 +49,19 @@ on Ollama; the remote synthesis runs on whatever model your Copilot plan exposes
   chart, expandable findings (with evidence), AI-usage read, recent sessions.
 - **Redaction gate** (`src/redact.ts`) — the deterministic, local, ordered §8
   pipeline (strip code → mask secrets → HMAC-pseudonymize identifiers → drop
-  residual paths) over a hand-maintained `redaction.toml` denylist, with a
-  fail-closed self-check. Nothing identifying or proprietary leaves the machine.
-- **Weekly digest** (`src/synthesis.ts`) — the single remote call: the week's
-  local insights are redacted, previewed, and (on `--send`) synthesized by
-  GitHub Copilot CLI into a digest. The remote model sees conclusions, never the
-  codebase.
+  residual paths), now **tiered** (`strict` / `identifiers` / `raw`, set in
+  `redaction.toml` or `--redact`). Secret masking + a fail-closed secret-shape
+  self-check run at every tier.
+- **Weekly digest** (`src/synthesis.ts`) — a fully-local rendered digest plus
+  per-week aggregates; on `--send`, synthesized by GitHub Copilot CLI from the
+  redacted insights + stats.
+- **Open-ended detector** (`src/explore.ts`, `digest --explore`) — hands a
+  redacted, numbered week to a strong remote model to surface patterns beyond
+  the hardcoded detectors; results merge into the same characterize → rank →
+  digest pipeline. The deterministic detectors stay the reliable backbone.
+- **Remote-call metering** (`src/usage.ts`) — every Copilot call is logged
+  locally (sizes, purpose, reported credits) and shown in `stats` + the
+  dashboard. No payload content is stored.
 
 ## Quickstart
 
@@ -69,11 +80,13 @@ bun run src/cli.ts insights --db ./postcaptain.db --model llama3.2:latest
 # ask a question about your own activity (retrieval-augmented, local model)
 bun run src/cli.ts ask "when did I work on the proxy config?" --db ./postcaptain.db
 
-# weekly digest — preview exactly what would go remote (no call, no cost)
-cp redaction.toml.example redaction.toml   # then edit for your environment
+# weekly digest — fully-local render + a preview of exactly what would go remote
+cp redaction.toml.example redaction.toml   # set `level` + denylist for your env
 bun run src/cli.ts digest --db ./postcaptain.db
-# …and make the one remote call (GitHub Copilot CLI, redacted input only)
-bun run src/cli.ts digest --db ./postcaptain.db --send
+# widen findings with the remote open-ended detector, then synthesize remotely
+bun run src/cli.ts digest --db ./postcaptain.db --explore --send
+# override the tier for one run (strict | identifiers | raw)
+bun run src/cli.ts digest --db ./postcaptain.db --redact strict
 
 # open the dashboard
 bun run src/cli.ts serve   --db ./postcaptain.db    # → http://localhost:4317
@@ -84,8 +97,9 @@ Convenient script shortcuts (see `package.json`):
 ```bash
 bun run capture            # bun run src/cli.ts capture
 bun run insights           # local-LLM findings + drafted artifacts
-bun run digest             # preview the weekly digest (no remote call)
-bun run digest:send        # preview + the one remote Copilot CLI call
+bun run digest             # local digest + preview (no remote call)
+bun run digest:explore     # + remote open-ended detector (1 remote call)
+bun run digest:send        # explore + remote synthesis (the full path)
 bun run serve              # open the dashboard
 bun run seed --db ./postcaptain-synthetic.db   # realistic synthetic week
 bun run check              # format + typecheck + test in one shot
@@ -108,8 +122,8 @@ remote digest) on a realistic week:
 
 ```bash
 bun run seed --db ./postcaptain-synthetic.db    # fires all four detectors
-bun run src/cli.ts digest --db ./postcaptain-synthetic.db          # preview
-bun run src/cli.ts digest --db ./postcaptain-synthetic.db --send   # full path
+bun run src/cli.ts digest --db ./postcaptain-synthetic.db                    # local + preview
+bun run src/cli.ts digest --db ./postcaptain-synthetic.db --explore --send   # full remote path
 ```
 
 ## Tooling
@@ -129,12 +143,16 @@ src/
     copilot.ts         # VS Code / GitHub Copilot chat collector
     github.ts          # local git commit collector
   sessionizer.ts       # events → ticket-keyed work sessions
-  detectors.ts         # no-LLM pattern detectors → candidates
+  detectors.ts         # no-LLM pattern detectors → candidates (the backbone)
+  explore.ts           # remote open-ended detector → extra candidates
   characterizer.ts     # local-LLM candidate → insight (+ drafted artifact)
   query.ts             # interactive retrieval-augmented Q&A over the store
   llm.ts               # Ollama client (generate + embeddings) + cosine distance
   recap.ts             # daily recap aggregation
+  redact.ts            # tiered §8 redaction gate (secrets always masked)
+  synthesis.ts         # weekly digest: local render + remote Copilot synthesis
+  usage.ts             # remote-call metering (sizes, purpose, credits)
   dashboard.ts         # local web dashboard (Bun.serve, server-rendered)
-  cli.ts               # capture / stats / insights / ask / serve
+  cli.ts               # capture / stats / insights / ask / digest / serve
 tests/                 # *.test.ts tests (synthetic fixtures + a temp git repo)
 ```

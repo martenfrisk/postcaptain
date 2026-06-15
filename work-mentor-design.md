@@ -272,14 +272,27 @@ Links above a surfacing score feed the weekly digest's knowledge section and the
 
 ## 8. Privacy & data flow
 
-- **Local by default.** Collectors, detectors, theme aggregation, and the characterizer run entirely on a local model (Ollama). Raw code, prompts, responses, and any meeting content never leave the machine.
+- **Local by default; remote tier configurable (revised 2026-06-15).** Collectors, detectors, theme aggregation, and the local characterizer still run on Ollama. What leaves the machine is now governed by a **redaction tier** the owner sets, not a hard "raw never leaves" rule — see *Redaction tiers* below. The original local-first choice was about *capability* ("throw the week at a model and find signal in the noise") as much as privacy; the tiers make that trade-off explicit and adjustable.
 - **Sensitivity tiering.** Set at collection. Work-repo / Copilot / Jira events = `sensitive`; calendar + window metadata = `low–medium`; public reading = `low`.
-- **Redaction pass (local, deterministic)** before anything is remote-eligible: strip code blocks, hash repo names / internal domains / paths, mask secret-ish patterns. Light regex + a denylist of company domains/repos is sufficient (stakes are moderate — e-commerce, little critical secret material — but still careful).
-- **Routing rule.** The only thing that goes remote is the weekly synthesis input: already-abstracted, already-LLM-summarized insight objects, post-redaction. The powerful model sees conclusions, never the codebase.
-- **Remote endpoint = Copilot CLI (resolved).** Synthesis runs through GitHub Copilot CLI in non-interactive mode (already authorized on the work machine, latest Claude/GPT models). This is still a remote endpoint, so the redaction gate applies unchanged — but staying inside the GitHub/Microsoft boundary the company already trusts is a better posture than a loose third-party API key.
-- **Visible + opt-in.** Remote calls log a "this is what would be sent" preview.
+- **Redaction pass (local, deterministic, tiered)** before anything is remote-eligible: strip code blocks, mask secret-ish patterns, and — *at `strict` only* — pseudonymize repo names / internal domains / paths / tickets. Secret masking and the secret-shape self-check run at **every** tier.
+- **Routing rule.** Two things may go remote, both through the redaction gate at the active tier: (1) the **weekly synthesis input** — abstracted, locally-characterized insight objects + per-week aggregate stats; and (2) the **open-ended detector's activity log** — a redacted, numbered transcript of the week, handed to the remote model so it can surface patterns the deterministic catalog misses. At `strict` the powerful model sees only conclusions; at relaxed tiers it sees readable identifiers and (at `raw`) verbatim prompts/code — never secrets.
+- **Remote endpoint = Copilot CLI (resolved).** Synthesis and open-ended detection run through GitHub Copilot CLI in non-interactive mode (already authorized on the work machine, latest Claude/GPT models). Staying inside the GitHub/Microsoft boundary the company already trusts is a better posture than a loose third-party API key. Every call is **metered** locally (`usage.ts`): sizes, purpose, and reported credits, surfaced in `stats` and the dashboard.
+- **Visible + opt-in.** Remote calls log a "this is what would be sent" preview; the local digest renders with no remote call at all, so the remote synthesis is an upgrade, not a dependency.
 
-Data flow: `sensitive raw → local LLM → abstracted insight → redact → Copilot CLI synthesis`.
+Data flow (synthesis): `sensitive raw → local LLM → abstracted insight → redact(tier) → Copilot CLI synthesis`.
+Data flow (open-ended detection): `sensitive raw → redact(tier) activity log → Copilot CLI → candidates → local characterize → digest`.
+
+### Redaction tiers (resolved 2026-06-15)
+
+The redaction level is an owner setting (`redaction.toml` `level = "..."`, or `--redact`), default **`identifiers`**:
+
+| Tier | Code blocks | Secrets | Identifiers (repo/ticket/host/path) |
+| --- | --- | --- | --- |
+| `strict` | stripped | masked | pseudonymized (HMAC tokens) |
+| `identifiers` *(default)* | stripped | masked | **kept readable** |
+| `raw` | **kept verbatim** | masked | kept readable |
+
+**Invariant across all tiers:** credential/secret masking is always on, and the fail-closed secret-shape self-check aborts the send if a key shape survives. Relaxing past `strict` is deliberate — the owner already shares this code with the same remote model day-to-day — but a leaked secret is never an insight at any tier. The denylist-literal self-check only applies at `strict`.
 
 ### Redaction rules (resolved)
 
@@ -306,7 +319,7 @@ Anything matching the denylist is force-pseudonymized even if a generic rule mis
 
 ### Characterizer escalation policy (resolved: no)
 
-**The characterizer never auto-escalates raw or near-raw context to a remote model.** It runs entirely on the local model (Ollama) with read-only tools. If a candidate stays below the confidence bar after local characterization, it is **held/tracked silently** (per the §6 gates), not sent remote for a "second opinion." Raw prompts/code never leave the machine — that invariant outranks getting a sharper take on a hard case. The *only* remote call remains the weekly synthesis over already-abstracted, already-redacted insight objects. (A future, explicitly user-initiated "deep dive" on a single insight could run that **redacted** insight through Copilot CLI, but it would be manual, opt-in, and subject to the same redaction gate — it is not autonomous escalation.)
+**The characterizer never auto-escalates per-candidate context to a remote model.** It runs entirely on the local model (Ollama) with read-only tools. If a candidate stays below the confidence bar after local characterization, it is **held/tracked silently** (per the §6 gates), not sent remote for a "second opinion." This is distinct from the two *deliberate, owner-configured* remote stages (weekly synthesis and the opt-in `--explore` open-ended detector): those are explicit, tier-gated, and metered — not silent per-candidate escalation. What goes remote in those stages is governed by the active redaction tier (above), with secret masking enforced at every tier.
 
 ---
 

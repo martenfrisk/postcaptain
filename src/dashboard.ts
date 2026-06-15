@@ -14,6 +14,7 @@ import type { Event } from "./events.ts";
 import { type DailyRecap, dailyRecap } from "./recap.ts";
 import { type Session, sessionize } from "./sessionizer.ts";
 import { EventStore } from "./store.ts";
+import { readUsage, summarizeUsage } from "./usage.ts";
 
 interface Model {
   events: Event[];
@@ -257,6 +258,32 @@ function renderAiUsage(m: Model): string {
   </section>`;
 }
 
+/**
+ * The mentor's own remote footprint (premium Copilot calls it made on the
+ * user's behalf). Read from the local usage log; absent until the first call.
+ */
+function renderRemoteUsage(): string {
+  const u = summarizeUsage(readUsage());
+  if (u.calls === 0) return "";
+  const credits =
+    u.creditsKnown > 0
+      ? `~${u.credits.toFixed(1)} (${u.creditsKnown}/${u.calls} reported)`
+      : "not reported";
+  const purposes =
+    Object.entries(u.byPurpose)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `<span class="tag">${esc(k)} ${num(n)}</span>`)
+      .join(" ") || "—";
+  return `<section class="panel">
+    <h2>Remote usage <span class="muted">this tool's premium calls</span></h2>
+    <section class="grid">
+      ${card("remote calls", num(u.calls), purposes)}
+      ${card("est. tokens", `~${num(u.promptTokensEst + u.responseTokensEst)}`, `${num(u.promptTokensEst)} in / ${num(u.responseTokensEst)} out`)}
+      ${card("AI credits", credits)}
+    </section>
+  </section>`;
+}
+
 /** One evidence event, rendered for a finding's expanded detail. */
 function evidenceRow(e: Event): string {
   const when = isoMinute(e.ts);
@@ -460,8 +487,9 @@ export function renderPage(m: Model): string {
   ${renderActivity(m)}
   ${renderFindings(m)}
   ${renderAiUsage(m)}
+  ${renderRemoteUsage()}
   ${renderSessions(m)}
-  <footer>Read-only view · raw activity never leaves this machine · reload to refresh after a capture.</footer>
+  <footer>Read-only view · only redacted insights go remote (tier-gated; secrets always masked) · reload to refresh after a capture.</footer>
 </body>
 </html>`;
 }

@@ -1,11 +1,19 @@
-# Redaction denylist (design §8) — the safety net over the generic regex rules.
+# Redaction config (design §8) — the tier + the denylist safety net.
 #
 # Copy to `redaction.toml` (git-ignored) and fill in your environment's
-# identifiers. Anything listed here is force-pseudonymized into stable, one-way
-# HMAC tokens (repo:7f3a, host:1c9e, …) before the weekly digest's single remote
-# call. The denylist is intentionally NOT a classifier — it's a small,
-# hand-maintained list. Generic rules (code/secret/email/path stripping) run
-# regardless; this just guarantees your specific names never slip through.
+# identifiers.
+
+# Redaction tier for anything that goes remote (override per-run with --redact):
+#   strict       — strip code, mask secrets, pseudonymize ALL identifiers (HMAC tokens)
+#   identifiers  — strip code, mask secrets, keep repo/ticket/host/path names readable  (default)
+#   raw          — keep verbatim prompts/code + identifiers; mask secrets only
+# Secret masking + the fail-closed secret-shape self-check run at EVERY tier —
+# a leaked credential never goes remote regardless of this setting.
+level = "identifiers"
+
+# Denylist — only force-pseudonymized at the `strict` tier (a small, hand-
+# maintained list, NOT a classifier). At `identifiers`/`raw` these names are
+# intentionally kept readable. Generic code/secret stripping runs regardless.
 
 # Company / product domains → host:xxxx
 company_domains = ["example-corp.com", "internal.example-corp.com"]

@@ -16,11 +16,18 @@
 
 import { tmpdir } from "node:os";
 import { characterizeAll, type Insight } from "./characterizer.ts";
-import { detectAll } from "./detectors.ts";
+import { type Candidate, detectAll } from "./detectors.ts";
 import type { Event } from "./events.ts";
 import type { LlmClient } from "./llm.ts";
-import { type Denylist, type RedactedInsight, redactInsights } from "./redact.ts";
+import {
+  DEFAULT_LEVEL,
+  type Denylist,
+  type RedactedInsight,
+  type RedactionLevel,
+  redactInsights,
+} from "./redact.ts";
 import { sessionize } from "./sessionizer.ts";
+import { makeRecord, recordUsage } from "./usage.ts";
 
 /** The remote model is invoked through this seam so tests can inject a fake. */
 export type CopilotRunner = (prompt: string, model: string) => Promise<string>;
@@ -31,8 +38,11 @@ const DEFAULT_MODEL = "auto"; // let Copilot pick; no premium model required
  * Real Copilot CLI runner: `copilot -p <prompt> --model <m>` in non-interactive
  * mode. Runs in a temp dir (not the repo) so the agent can't touch project
  * files, and reads only stdout (the answer; the credits/token footer is stderr).
+ *
+ * Every call is metered: the stderr footer is parsed for credits and the call's
+ * sizes are appended to the local usage log under `purpose` (no content stored).
  */
-export function copilotRunner(): CopilotRunner {
+export function copilotRunner(purpose = "digest"): CopilotRunner {
   return async (prompt, model) => {
     const proc = Bun.spawn(
       ["copilot", "-p", prompt, "--model", model, "--allow-all-tools", "--no-color"],
@@ -46,7 +56,13 @@ export function copilotRunner(): CopilotRunner {
     if (code !== 0) {
       throw new Error(`copilot exited ${code}: ${stderr.trim().slice(0, 300)}`);
     }
-    return stdout.trim();
+    const response = stdout.trim();
+    try {
+      recordUsage(makeRecord({ purpose, model, prompt, response, stderr }));
+    } catch {
+      // metering must never break the actual call
+    }
+    return response;
   };
 }
 
@@ -73,62 +89,165 @@ export function weekRange(day: Date = new Date()): WeekRange {
 
 // --- digest assembly ---------------------------------------------------------
 
+/** Per-project week aggregates — quantitative grounding for the AI-usage read. */
+export interface WeekStats {
+  aiInteractions: number;
+  canceled: number;
+  commits: number;
+  promptTokensEst: number;
+  responseTokensEst: number;
+  projects: number;
+  tickets: number;
+}
+
 export interface DigestInput {
   week: WeekRange;
+  level: RedactionLevel;
+  stats: WeekStats;
   insights: Insight[]; // local, pre-redaction (for the operator's own view)
   redacted: RedactedInsight[]; // exactly what would be sent remote
+}
+
+function weekStats(events: Event[]): WeekStats {
+  const ai = events.filter((e) => e.kind === "ai_interaction");
+  const num = (v: unknown): number => (typeof v === "number" ? v : 0);
+  return {
+    aiInteractions: ai.length,
+    canceled: ai.filter((e) => Boolean(e.payload.isCanceled)).length,
+    commits: events.filter((e) => e.kind === "commit").length,
+    promptTokensEst: ai.reduce((s, e) => s + num(e.payload.promptTokensEst), 0),
+    responseTokensEst: ai.reduce((s, e) => s + num(e.payload.responseTokensEst), 0),
+    projects: new Set(events.map((e) => e.project).filter(Boolean)).size,
+    tickets: new Set(events.map((e) => e.ticket).filter(Boolean)).size,
+  };
 }
 
 /**
  * Assemble the week's redacted insights locally: filter events to the week, run
  * the deterministic detectors, characterize them on the LOCAL model, then
- * redact. No remote call happens here — this is the reviewable, fail-closed
- * preparation step.
+ * redact at the configured tier. No remote call happens here — this is the
+ * reviewable, fail-closed preparation step. Extra `candidates` (e.g. from the
+ * remote open-ended detector) can be folded in alongside the deterministic ones.
  */
 export async function buildDigestInput(
   events: Event[],
   client: LlmClient,
   denylist: Denylist,
   salt: string,
-  opts: { day?: Date; minConfidence?: number } = {},
+  opts: {
+    day?: Date;
+    minConfidence?: number;
+    level?: RedactionLevel;
+    extraCandidates?: Candidate[];
+  } = {},
 ): Promise<DigestInput> {
+  const level = opts.level ?? DEFAULT_LEVEL;
   const week = weekRange(opts.day);
   const inWeek = events.filter((e) => e.ts >= week.startTs && e.ts < week.endTs);
-  const candidates = detectAll({ events: inWeek, sessions: sessionize(inWeek) });
+  const candidates = [
+    ...detectAll({ events: inWeek, sessions: sessionize(inWeek) }),
+    ...(opts.extraCandidates ?? []),
+  ].sort((a, b) => b.confidence - a.confidence);
   const byId = new Map(inWeek.map((e) => [e.eventId, e]));
   const insights = await characterizeAll(candidates, byId, client, {
     minConfidence: opts.minConfidence ?? 0.6,
   });
-  const redacted = redactInsights(insights, denylist, salt);
-  return { week, insights, redacted };
+  const redacted = redactInsights(insights, denylist, salt, level);
+  return { week, level, stats: weekStats(inWeek), insights, redacted };
 }
 
 const SYNTHESIS_PROMPT = [
   "You are a senior engineer writing a developer's WEEKLY work digest.",
-  "Below is a JSON array of already-redacted, abstracted insights from their week",
-  "(identifiers are pseudonymized tokens like repo:7f3a — treat them as opaque labels).",
+  "Below is the week's STATS (quantitative grounding) and a JSON array of",
+  "already-redacted, abstracted insights. Identifiers may be pseudonymized tokens",
+  "like repo:7f3a — treat any such token as an opaque label.",
   "Write a concise digest in Markdown with exactly these sections:",
   "1. **Top insights** — the 3–5 most worthwhile, each: one-line why + the concrete next action.",
-  "2. **AI-usage read** — where AI clearly helped vs. cost time, and ONE habit to change.",
+  "2. **AI-usage read** — read the stats: where AI clearly helped vs. cost time, and ONE habit to change.",
   "3. **One experiment** — a single concrete thing to try next week.",
-  "Be specific and brief. Ground every claim in the provided insights — do not invent activity.",
+  "Be specific and brief. Ground every claim in the provided stats/insights — do not invent activity.",
   "Output only the Markdown digest. Do not use any tools.",
 ].join(" ");
 
+function statsBlock(week: WeekRange, stats: WeekStats): string {
+  const cancelPct = stats.aiInteractions
+    ? Math.round((stats.canceled / stats.aiInteractions) * 100)
+    : 0;
+  return JSON.stringify(
+    {
+      week: week.label,
+      aiInteractions: stats.aiInteractions,
+      canceled: stats.canceled,
+      canceledPct: cancelPct,
+      commits: stats.commits,
+      promptTokensEst: stats.promptTokensEst,
+      responseTokensEst: stats.responseTokensEst,
+      projects: stats.projects,
+      tickets: stats.tickets,
+    },
+    null,
+    2,
+  );
+}
+
 /** The exact prompt+payload that would be sent to the remote model. */
-export function buildSynthesisPrompt(redacted: RedactedInsight[]): string {
-  return `${SYNTHESIS_PROMPT}\n\nINSIGHTS:\n${JSON.stringify(redacted, null, 2)}`;
+export function buildSynthesisPrompt(input: DigestInput): string {
+  return [
+    SYNTHESIS_PROMPT,
+    "",
+    `STATS:\n${statsBlock(input.week, input.stats)}`,
+    "",
+    `INSIGHTS:\n${JSON.stringify(input.redacted, null, 2)}`,
+  ].join("\n");
+}
+
+/**
+ * A deterministic, fully-local digest — no remote call. Lets `digest` (without
+ * `--send`) produce something readable, and serves as the always-available
+ * fallback. The remote synthesis is then a clear *upgrade*, not the only path.
+ */
+export function localDigest(input: DigestInput): string {
+  const { stats } = input;
+  const cancelPct = stats.aiInteractions
+    ? Math.round((stats.canceled / stats.aiInteractions) * 100)
+    : 0;
+  const lines = [
+    `# Weekly digest — ${input.week.label}`,
+    "",
+    `**Activity:** ${stats.aiInteractions} AI interactions (${cancelPct}% canceled), ` +
+      `${stats.commits} commits across ${stats.projects} projects / ${stats.tickets} tickets. ` +
+      `~${stats.promptTokensEst + stats.responseTokensEst} est. tokens.`,
+    "",
+    "## Findings",
+  ];
+  if (input.insights.length === 0) {
+    lines.push("", "_No findings above the confidence bar this week._");
+    return lines.join("\n");
+  }
+  for (const i of input.insights) {
+    lines.push(
+      "",
+      `### ${i.headline}  _(${i.category} · ${(i.confidence * 100).toFixed(0)}%)_`,
+      i.whatHappened,
+      `→ **${i.suggestion}**`,
+    );
+    if (i.artifactDraft) {
+      lines.push("", `_${i.artifactType}:_`, "```", i.artifactDraft, "```");
+    }
+  }
+  return lines.join("\n");
 }
 
 /** Human-readable "this is what would be sent" preview (§8 visible + opt-in). */
 export function previewText(input: DigestInput): string {
   const lines = [
     `Week: ${input.week.label}`,
+    `Redaction tier: ${input.level}${input.level !== "strict" ? "  (identifiers NOT pseudonymized; secrets still masked)" : ""}`,
     `Insights characterized locally: ${input.insights.length}`,
     "",
-    "── This is exactly what would be sent to Copilot CLI (redacted) ──",
+    "── This is exactly what would be sent to Copilot CLI ──",
     "",
-    buildSynthesisPrompt(input.redacted),
+    buildSynthesisPrompt(input),
   ];
   return lines.join("\n");
 }
@@ -152,6 +271,6 @@ export async function synthesize(
   if (input.redacted.length === 0) {
     return { week: input.week, sent: false, redacted: [] };
   }
-  const digest = await runner(buildSynthesisPrompt(input.redacted), model);
+  const digest = await runner(buildSynthesisPrompt(input), model);
   return { week: input.week, sent: true, digest, redacted: input.redacted };
 }
