@@ -12,10 +12,17 @@
   "scripts": {
     "capture": "bun run src/cli.ts capture",
     "stats": "bun run src/cli.ts stats",
+    "insights": "bun run src/cli.ts insights",
+    "ask": "bun run src/cli.ts ask",
+    "digest": "bun run src/cli.ts digest",
+    "digest:send": "bun run src/cli.ts digest --send",
+    "serve": "bun run src/cli.ts serve",
+    "seed": "bun run scripts/seed-synthetic.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "check": "biome check --write . && tsc --noEmit && bun test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",

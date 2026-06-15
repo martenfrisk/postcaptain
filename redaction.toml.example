@@ -1,0 +1,23 @@
+# Redaction denylist (design §8) — the safety net over the generic regex rules.
+#
+# Copy to `redaction.toml` (git-ignored) and fill in your environment's
+# identifiers. Anything listed here is force-pseudonymized into stable, one-way
+# HMAC tokens (repo:7f3a, host:1c9e, …) before the weekly digest's single remote
+# call. The denylist is intentionally NOT a classifier — it's a small,
+# hand-maintained list. Generic rules (code/secret/email/path stripping) run
+# regardless; this just guarantees your specific names never slip through.
+
+# Company / product domains → host:xxxx
+company_domains = ["example-corp.com", "internal.example-corp.com"]
+
+# GitHub (or other) orgs → repo:xxxx
+repo_orgs = ["example-corp", "example-corp-labs"]
+
+# Extra repo names to force-pseudonymize → repo:xxxx
+repo_names = ["checkout-service", "pricing-engine"]
+
+# Internal hostnames (Jira, git, CI, …) → host:xxxx
+internal_hosts = ["jira.example-corp.com", "git.example-corp.com"]
+
+# Optional extra people names to mask → user:xxxx
+people = []

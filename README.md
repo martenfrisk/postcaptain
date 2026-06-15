@@ -17,12 +17,13 @@ See [`work-mentor-design.md`](work-mentor-design.md) for the full design.
 
 ## Status
 
-The local pipeline is working end-to-end:
+The pipeline is working end-to-end:
 **capture → sessionize → detect → characterize → recap → dashboard**, plus
-**interactive `ask`** — design phases 1–2 and all of phase 3 (characterizer +
-interactive query). The model layers run on a local Ollama model. Still pending:
-the weekly *remote* synthesis (needs Copilot CLI), themes/lessons (phase 4), and
-the exploration tier (phase 5).
+**interactive `ask`** and the **weekly `digest`** — the one remote call, through
+GitHub Copilot CLI, behind the redaction gate (§8). The local model layers run
+on Ollama; the remote synthesis runs on whatever model your Copilot plan exposes
+(`auto` by default — no premium model required). Still pending: themes/lessons
+(phase 4) and the exploration tier (phase 5).
 
 ### Done so far
 
@@ -42,6 +43,14 @@ the exploration tier (phase 5).
   degrades to the deterministic candidate if Ollama is down.
 - **Dashboard** (`src/dashboard.ts`) — local web view: summary, recap, activity
   chart, expandable findings (with evidence), AI-usage read, recent sessions.
+- **Redaction gate** (`src/redact.ts`) — the deterministic, local, ordered §8
+  pipeline (strip code → mask secrets → HMAC-pseudonymize identifiers → drop
+  residual paths) over a hand-maintained `redaction.toml` denylist, with a
+  fail-closed self-check. Nothing identifying or proprietary leaves the machine.
+- **Weekly digest** (`src/synthesis.ts`) — the single remote call: the week's
+  local insights are redacted, previewed, and (on `--send`) synthesized by
+  GitHub Copilot CLI into a digest. The remote model sees conclusions, never the
+  codebase.
 
 ## Quickstart
 
@@ -60,16 +69,48 @@ bun run src/cli.ts insights --db ./postcaptain.db --model llama3.2:latest
 # ask a question about your own activity (retrieval-augmented, local model)
 bun run src/cli.ts ask "when did I work on the proxy config?" --db ./postcaptain.db
 
+# weekly digest — preview exactly what would go remote (no call, no cost)
+cp redaction.toml.example redaction.toml   # then edit for your environment
+bun run src/cli.ts digest --db ./postcaptain.db
+# …and make the one remote call (GitHub Copilot CLI, redacted input only)
+bun run src/cli.ts digest --db ./postcaptain.db --send
+
 # open the dashboard
 bun run src/cli.ts serve   --db ./postcaptain.db    # → http://localhost:4317
-
-bun test                     # run the suite
-bun run typecheck            # tsc --noEmit
-bun run lint                 # biome check (lint + format + import order)
-bun run format               # biome check --write (apply fixes)
 ```
 
-Captured data is local and git-ignored (`*.db`).
+Convenient script shortcuts (see `package.json`):
+
+```bash
+bun run capture            # bun run src/cli.ts capture
+bun run insights           # local-LLM findings + drafted artifacts
+bun run digest             # preview the weekly digest (no remote call)
+bun run digest:send        # preview + the one remote Copilot CLI call
+bun run serve              # open the dashboard
+bun run seed --db ./postcaptain-synthetic.db   # realistic synthetic week
+bun run check              # format + typecheck + test in one shot
+
+bun test                   # run the suite
+bun run typecheck          # tsc --noEmit
+bun run lint               # biome check (lint + format + import order)
+bun run format             # biome check --write (apply fixes)
+```
+
+Captured data is local and git-ignored (`*.db`). The redaction denylist
+(`redaction.toml`) and the pseudonym salt (`.postcaptain.salt`) are local-only
+and never committed.
+
+### Trying it without your own data
+
+The captured store is sparse week-to-week, so detectors may not fire on a single
+real week yet. To exercise the whole flow (detect → characterize → redact →
+remote digest) on a realistic week:
+
+```bash
+bun run seed --db ./postcaptain-synthetic.db    # fires all four detectors
+bun run src/cli.ts digest --db ./postcaptain-synthetic.db          # preview
+bun run src/cli.ts digest --db ./postcaptain-synthetic.db --send   # full path
+```
 
 ## Tooling
 

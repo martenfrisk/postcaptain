@@ -363,12 +363,12 @@ Cap screenpipe's disk usage in its own settings as a backstop.
 ### Suggested phasing
 
 1. **Capture + store:** collectors → normalized event store (start with Copilot + GitHub + ActivityWatch + calendar). — *built: Copilot chat + local git collectors → `bun:sqlite` store; sessionizer.*
-2. **Deterministic detectors + daily/weekly digest:** prove the insight format is useful. — *built: no-LLM detectors, daily recap, and a local dashboard. Weekly (LLM) digest pending phase 3.*
+2. **Deterministic detectors + daily/weekly digest:** prove the insight format is useful. — *built: no-LLM detectors, daily recap, a local dashboard, and the weekly remote digest (Copilot CLI, behind the redaction gate).*
 3. **Characterizer harness + interactive query:** the one-agent-two-modes layer. — *built: characterizer (local Ollama; candidate → insight + drafted artifact, deterministic fallback) and interactive `ask` (retrieval-augmented Q&A). A full tool-using agent loop is the richer future version.*
 4. **Themes + lessons:** longitudinal tracking. — *pending.*
 5. **Exploration tier:** self-grown detectors + anti-Clippy gates. — *pending (embedding/cosine novelty helper in place via `llm.ts`).*
 
-Built so far: `capture → sessionize → detect → characterize → recap → dashboard`. All local — the characterizer runs on Ollama. The one remaining *remote* piece, the weekly synthesis, is gated on Copilot CLI (not installed in the current environment).
+Built so far: `capture → sessionize → detect → characterize → recap → dashboard`, plus interactive `ask` and the weekly `digest`. Everything through characterization is local (Ollama). The one *remote* piece — the weekly synthesis — is implemented (`src/redact.ts` + `src/synthesis.ts`, the `digest` command) and verified end-to-end through GitHub Copilot CLI in non-interactive mode: the week's local insights are redacted (fail-closed self-check), previewed, and on `--send` synthesized remotely. The remote model runs on `auto` (no premium model required) and sees only pseudonymized conclusions.
 
 ---
 
@@ -389,7 +389,7 @@ Built so far: `capture → sessionize → detect → characterize → recap → 
 - **Work session:** gap threshold ~25–30 min inactivity or project switch; keyed on Jira ticket, falling back to repo/workspace.
 - **Ticket linkage:** `[A-Z][A-Z0-9]+-\d+` from branch names (convention: `ABC-123-...`), commits/PR titles as fallback. Doubles as the project key.
 - **Token estimation:** heuristic (chars ÷ 4) to start; relative accuracy is enough. Upgrade path via ai-engineering-fluency or debug log.
-- **Remote synthesis model:** Copilot CLI, non-interactive, Claude Sonnet 4.6 default (revisit later). Redaction gate applies.
+- **Remote synthesis model:** Copilot CLI, non-interactive. Implemented default is `auto` (Copilot picks an available model — no premium quota required); override with `--remote-model`. Redaction gate applies regardless.
 - **Storage/retention:** 21 days raw / 12 months events / indefinite insights (see §11).
 - **Gate thresholds:** confidence ≥ 0.6, novelty cosine distance ≥ 0.15–0.2, start conservative, log suppressed insights, tune on feedback.
 - **Lesson progress display:** status lifecycle + trend line, surfaced only on material change, with a one-time resolved close-out (see §7).

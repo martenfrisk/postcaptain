@@ -15,3 +15,7 @@ postcaptain.db
 
 # Local redaction denylist — environment-specific company domains/repos
 redaction.toml
+
+# Local HMAC salt for redaction pseudonyms — must never leave the machine
+.postcaptain.salt
+*.salt

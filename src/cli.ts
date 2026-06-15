@@ -16,8 +16,10 @@ import * as github from "./collectors/github.ts";
 import { detectAll } from "./detectors.ts";
 import { ollamaClient } from "./llm.ts";
 import { answer } from "./query.ts";
+import { loadDenylist, loadOrCreateSalt, RedactionError } from "./redact.ts";
 import { sessionize } from "./sessionizer.ts";
 import { EventStore } from "./store.ts";
+import { buildDigestInput, copilotRunner, previewText, synthesize } from "./synthesis.ts";
 
 async function capture(dbPath: string): Promise<number> {
   const store = new EventStore(dbPath);
@@ -116,6 +118,66 @@ async function ask(dbPath: string, model: string, question: string): Promise<num
   return 0;
 }
 
+/**
+ * Weekly digest (§8/§9) — the one remote call. Characterizes the week's
+ * findings on the LOCAL model, runs them through the redaction gate, and shows
+ * a "what would be sent" preview. The remote Copilot CLI call only happens with
+ * `--send` (opt-in); redaction is fail-closed.
+ */
+async function digest(
+  dbPath: string,
+  localModel: string,
+  remoteModel: string,
+  minConfidence: number,
+  opts: { send: boolean; week?: string },
+): Promise<number> {
+  const store = new EventStore(dbPath);
+  let events: ReturnType<EventStore["query"]>;
+  try {
+    events = store.query();
+  } finally {
+    store.close();
+  }
+
+  const denylist = loadDenylist();
+  const salt = loadOrCreateSalt();
+  const day = opts.week ? new Date(opts.week) : undefined;
+  if (day && Number.isNaN(day.getTime())) {
+    console.error(`invalid --week date: ${opts.week} (use YYYY-MM-DD)`);
+    return 2;
+  }
+
+  let input: Awaited<ReturnType<typeof buildDigestInput>>;
+  try {
+    input = await buildDigestInput(events, ollamaClient({ model: localModel }), denylist, salt, {
+      day,
+      minConfidence,
+    });
+  } catch (err) {
+    if (err instanceof RedactionError) {
+      console.error(`✗ redaction self-check failed — send aborted: ${err.message}`);
+      return 1;
+    }
+    throw err;
+  }
+
+  console.log(previewText(input));
+
+  if (input.redacted.length === 0) {
+    console.log("\nNo findings for this week above the confidence bar — nothing to send.");
+    return 0;
+  }
+  if (!opts.send) {
+    console.log("\n(preview only — re-run with --send to make the remote Copilot CLI call)");
+    return 0;
+  }
+
+  console.log(`\n→ sending to Copilot CLI (model: ${remoteModel})…\n`);
+  const result = await synthesize(input, copilotRunner(), remoteModel);
+  console.log(result.digest ?? "(no digest returned)");
+  return 0;
+}
+
 async function serve(dbPath: string, port: number): Promise<number> {
   const { startServer } = await import("./dashboard.ts");
   startServer(dbPath, port);
@@ -131,7 +193,10 @@ export async function main(argv: string[]): Promise<number> {
       db: { type: "string", default: "./postcaptain.db" },
       port: { type: "string", default: "4317" },
       model: { type: "string", default: "llama3.2:latest" },
+      "remote-model": { type: "string", default: "auto" },
       "min-confidence": { type: "string", default: "0.6" },
+      send: { type: "boolean", default: false },
+      week: { type: "string" },
     },
     allowPositionals: true,
   });
@@ -146,11 +211,19 @@ export async function main(argv: string[]): Promise<number> {
       return await insights(dbPath, values.model as string, Number(values["min-confidence"]));
     case "ask":
       return await ask(dbPath, values.model as string, positionals.join(" "));
+    case "digest":
+      return await digest(
+        dbPath,
+        values.model as string,
+        values["remote-model"] as string,
+        Number(values["min-confidence"]),
+        { send: values.send as boolean, week: values.week as string | undefined },
+      );
     case "serve":
       return await serve(dbPath, Number(values.port));
     default:
       console.error(
-        'usage: postcaptain <capture|stats|insights|ask "q"|serve> [--db PATH] [--port N] [--model M] [--min-confidence C]',
+        'usage: postcaptain <capture|stats|insights|ask "q"|digest|serve> [--db PATH] [--port N] [--model M] [--remote-model M] [--min-confidence C] [--week YYYY-MM-DD] [--send]',
       );
       return 2;
   }
