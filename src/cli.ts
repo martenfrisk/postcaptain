@@ -11,14 +11,19 @@
 
 import { parseArgs } from "node:util";
 import * as copilot from "./collectors/copilot.ts";
+import * as github from "./collectors/github.ts";
 import { EventStore } from "./store.ts";
 
-function capture(dbPath: string): number {
+async function capture(dbPath: string): Promise<number> {
   const store = new EventStore(dbPath);
   try {
-    const added = store.addMany(copilot.collect());
-    const total = store.count("ai_interaction");
-    console.log(`copilot: +${added} new ai_interaction events (${total} total) → ${dbPath}`);
+    const copilotAdded = store.addMany(copilot.collect());
+    console.log(
+      `copilot: +${copilotAdded} new ai_interaction events (${store.count("ai_interaction")} total)`,
+    );
+    const gitAdded = store.addMany(await github.collect());
+    console.log(`git:     +${gitAdded} new commit events (${store.count("commit")} total)`);
+    console.log(`→ ${dbPath}`);
   } finally {
     store.close();
   }
@@ -53,26 +58,37 @@ function topN(counts: Map<string, number>, n: number): Record<string, number> {
   return Object.fromEntries([...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, n));
 }
 
-export function main(argv: string[]): number {
+async function serve(dbPath: string, port: number): Promise<number> {
+  const { startServer } = await import("./dashboard.ts");
+  startServer(dbPath, port);
+  return 0;
+}
+
+export async function main(argv: string[]): Promise<number> {
   const cmd = argv[0];
   const { values } = parseArgs({
     args: argv.slice(1),
-    options: { db: { type: "string", default: "./postcaptain.db" } },
+    options: {
+      db: { type: "string", default: "./postcaptain.db" },
+      port: { type: "string", default: "4317" },
+    },
     allowPositionals: false,
   });
   const dbPath = values.db as string;
 
   switch (cmd) {
     case "capture":
-      return capture(dbPath);
+      return await capture(dbPath);
     case "stats":
       return stats(dbPath);
+    case "serve":
+      return await serve(dbPath, Number(values.port));
     default:
-      console.error("usage: postcaptain <capture|stats> [--db PATH]");
+      console.error("usage: postcaptain <capture|stats|serve> [--db PATH] [--port N]");
       return 2;
   }
 }
 
 if (import.meta.main) {
-  process.exit(main(process.argv.slice(2)));
+  process.exit(await main(process.argv.slice(2)));
 }
