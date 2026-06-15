@@ -14,6 +14,7 @@ import type { Event } from "./events.ts";
 import { type DailyRecap, dailyRecap } from "./recap.ts";
 import { type Session, sessionize } from "./sessionizer.ts";
 import { EventStore } from "./store.ts";
+import { isMaterialChange, type Theme, ThemeStore, trendLine } from "./themes.ts";
 import { readUsage, summarizeUsage } from "./usage.ts";
 
 interface Model {
@@ -22,6 +23,7 @@ interface Model {
   candidates: Candidate[];
   recap: DailyRecap | null;
   byId: Map<string, Event>;
+  lessons: Theme[];
 }
 
 export function buildModel(store: EventStore): Model {
@@ -29,7 +31,15 @@ export function buildModel(store: EventStore): Model {
   const sessions = sessionize(events);
   const candidates = detectAll({ events, sessions });
   const byId = new Map(events.map((e) => [e.eventId, e]));
-  return { events, sessions, candidates, recap: dailyRecap(events), byId };
+  // Tracked lessons live in the same db file (the longitudinal layer, §7).
+  const themeStore = new ThemeStore(store.path);
+  let lessons: Theme[];
+  try {
+    lessons = themeStore.all().filter((t) => t.category === "lesson");
+  } finally {
+    themeStore.close();
+  }
+  return { events, sessions, candidates, recap: dailyRecap(events), byId, lessons };
 }
 
 // ---- formatting & escaping -----------------------------------------------
@@ -343,6 +353,34 @@ function renderFindings(m: Model): string {
   return `<section class="panel"><h2>Findings <span class="muted">click to expand</span></h2><div class="findings">${items}</div></section>`;
 }
 
+/**
+ * Tracked lessons (§7) with their week-over-week trend. Materially-changed
+ * lessons (the ones that would surface in the digest) are marked; steady and
+ * dormant ones are shown muted so the longitudinal picture stays visible
+ * without nagging.
+ */
+function renderLessons(m: Model): string {
+  if (m.lessons.length === 0) return "";
+  const rows = m.lessons
+    .map((t) => {
+      const material = isMaterialChange(t.status);
+      const dot = material
+        ? '<span class="lesson-dot" title="surfaces in the digest">●</span>'
+        : "";
+      return `<li class="lesson ${t.status}${material ? " material" : ""}">
+        <div class="lesson-head">${dot}<span class="lesson-title">${esc(t.headline)}</span>
+          <span class="badge lesson-status ${t.status}">${esc(t.status)}</span></div>
+        <div class="lesson-trend">${esc(trendLine(t))}</div>
+        <div class="lesson-span muted">${esc(t.firstWeek)} → ${esc(t.lastWeek)} · → ${esc(t.suggestion)}</div>
+      </li>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <h2>Lessons <span class="muted">tracked over time</span></h2>
+    <ul class="lessons">${rows}</ul>
+  </section>`;
+}
+
 function renderSessions(m: Model): string {
   if (m.sessions.length === 0) return "";
   const rows = [...m.sessions]
@@ -458,6 +496,23 @@ export function renderPage(m: Model): string {
   .badge.shortcut { background: color-mix(in srgb, var(--c-ai) 18%, transparent); color: var(--c-ai); }
   .badge.lesson { background: color-mix(in srgb, var(--c-commit) 20%, transparent); color: var(--c-commit); }
 
+  /* lessons */
+  ul.lessons { list-style: none; margin: 0; padding: 0; display: grid; gap: .7rem; }
+  .lesson { border: 1px solid var(--line); border-radius: 10px; border-inline-start: 3px solid var(--muted); padding: .7rem .9rem; }
+  .lesson.material { border-inline-start-color: var(--accent); }
+  .lesson.improving { border-inline-start-color: var(--c-commit); }
+  .lesson.regressed { border-inline-start-color: var(--del); }
+  .lesson.dormant { opacity: .6; }
+  .lesson-head { display: flex; align-items: center; gap: .5rem; }
+  .lesson-dot { color: var(--accent); font-size: .7rem; }
+  .lesson-title { font-weight: 600; flex: 1 1 auto; min-inline-size: 0; }
+  .lesson-status { text-transform: uppercase; }
+  .lesson-status.improving { background: color-mix(in srgb, var(--c-commit) 20%, transparent); color: var(--c-commit); }
+  .lesson-status.regressed { background: color-mix(in srgb, var(--del) 18%, transparent); color: var(--del); }
+  .lesson-status.new { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .lesson-trend { font-variant-numeric: tabular-nums; font-size: 1.05rem; margin-block: .35rem .25rem; }
+  .lesson-span { font-size: .82rem; }
+
   /* evidence */
   table.evidence { inline-size: 100%; border-collapse: collapse; font-size: .85rem; background: color-mix(in srgb, var(--ink) 3%, transparent); border-radius: 8px; }
   table.evidence td { padding: .3rem .5rem; border-block-end: 1px solid var(--line); vertical-align: top; }
@@ -486,6 +541,7 @@ export function renderPage(m: Model): string {
   ${renderRecap(m.recap)}
   ${renderActivity(m)}
   ${renderFindings(m)}
+  ${renderLessons(m)}
   ${renderAiUsage(m)}
   ${renderRemoteUsage()}
   ${renderSessions(m)}

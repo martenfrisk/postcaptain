@@ -14,6 +14,7 @@ import { characterizeAll } from "./characterizer.ts";
 import * as copilot from "./collectors/copilot.ts";
 import * as github from "./collectors/github.ts";
 import { type Candidate, detectAll } from "./detectors.ts";
+import type { Event } from "./events.ts";
 import { exploreCandidates } from "./explore.ts";
 import { ollamaClient } from "./llm.ts";
 import { answer } from "./query.ts";
@@ -29,11 +30,13 @@ import { EventStore } from "./store.ts";
 import {
   buildDigestInput,
   copilotRunner,
+  type DigestLesson,
   localDigest,
   previewText,
   synthesize,
   weekRange,
 } from "./synthesis.ts";
+import { isMaterialChange, ThemeStore, trackWeek, trendLine, weekKey } from "./themes.ts";
 import { readUsage, summarizeUsage } from "./usage.ts";
 
 async function capture(dbPath: string): Promise<number> {
@@ -146,6 +149,49 @@ async function ask(dbPath: string, model: string, question: string): Promise<num
 }
 
 /**
+ * Detect the week's deterministic lessons, fold them into the persistent theme
+ * store, and return the ones that materially changed (§7) as digest lessons.
+ * Opens its own `ThemeStore` (same db file) and always closes it.
+ */
+function trackLessonsForWeek(dbPath: string, inWeek: Event[], week: string): DigestLesson[] {
+  const candidates = detectAll({ events: inWeek, sessions: sessionize(inWeek) });
+  const store = new ThemeStore(dbPath);
+  try {
+    return trackWeek(store, candidates, week)
+      .filter((t) => isMaterialChange(t.status))
+      .map((t) => ({
+        headline: t.headline,
+        trend: trendLine(t),
+        status: t.status,
+        suggestion: t.suggestion,
+      }));
+  } finally {
+    store.close();
+  }
+}
+
+/** Show every tracked lesson with its trend (§7). Read-only; no detection run. */
+function lessons(dbPath: string): number {
+  const store = new ThemeStore(dbPath);
+  try {
+    const tracked = store.all().filter((t) => t.category === "lesson");
+    if (tracked.length === 0) {
+      console.log("No lessons tracked yet. Run `digest` over a few weeks to build trends.");
+      return 0;
+    }
+    for (const t of tracked) {
+      const flag = isMaterialChange(t.status) ? "  ●" : "";
+      console.log(`\n${t.headline}${flag}`);
+      console.log(`  ${trendLine(t)}   (${t.firstWeek} → ${t.lastWeek})`);
+      console.log(`  → ${t.suggestion}`);
+    }
+  } finally {
+    store.close();
+  }
+  return 0;
+}
+
+/**
  * Weekly digest (§8/§9) — the one remote call. Characterizes the week's
  * findings on the LOCAL model, runs them through the redaction gate, and shows
  * a "what would be sent" preview. The remote Copilot CLI call only happens with
@@ -175,12 +221,13 @@ async function digest(
     return 2;
   }
 
+  const week = weekRange(day);
+  const inWeek = events.filter((e) => e.ts >= week.startTs && e.ts < week.endTs);
+
   // Open-ended detector (remote): widen the net beyond the deterministic catalog.
   // It's a remote call, so it only runs on explicit opt-in (--explore).
   let extraCandidates: Candidate[] = [];
   if (opts.explore) {
-    const week = weekRange(day);
-    const inWeek = events.filter((e) => e.ts >= week.startTs && e.ts < week.endTs);
     console.log(`→ open-ended detection on Copilot CLI (model: ${remoteModel})…`);
     extraCandidates = await exploreCandidates(inWeek, copilotRunner("explore"), {
       denylist,
@@ -191,6 +238,11 @@ async function digest(
     console.log(`  ${extraCandidates.length} additional candidate(s) found\n`);
   }
 
+  // Longitudinal layer (§7): fold this week's deterministic lessons into the
+  // persistent theme store and recompute each lesson's lifecycle. Local-only —
+  // no remote call. We surface only the ones that MATERIALLY changed this week.
+  const lessons = trackLessonsForWeek(dbPath, inWeek, weekKey(week.startTs));
+
   let input: Awaited<ReturnType<typeof buildDigestInput>>;
   try {
     input = await buildDigestInput(events, ollamaClient({ model: localModel }), denylist, salt, {
@@ -198,6 +250,7 @@ async function digest(
       minConfidence,
       level,
       extraCandidates,
+      lessons,
     });
   } catch (err) {
     if (err instanceof RedactionError) {
@@ -289,6 +342,8 @@ export async function main(argv: string[]): Promise<number> {
       return await insights(dbPath, values.model as string, Number(values["min-confidence"]));
     case "ask":
       return await ask(dbPath, values.model as string, positionals.join(" "));
+    case "lessons":
+      return lessons(dbPath);
     case "digest":
       return await digest(
         dbPath,
@@ -318,7 +373,7 @@ export async function main(argv: string[]): Promise<number> {
       return await serve(dbPath, Number(values.port));
     default:
       console.error(
-        'usage: postcaptain <run|capture|stats|insights|ask "q"|digest|serve> [--db PATH] [--port N] [--model M] [--remote-model M] [--min-confidence C] [--redact strict|identifiers|raw] [--explore] [--local] [--week YYYY-MM-DD] [--send]',
+        'usage: postcaptain <run|capture|stats|insights|ask "q"|lessons|digest|serve> [--db PATH] [--port N] [--model M] [--remote-model M] [--min-confidence C] [--redact strict|identifiers|raw] [--explore] [--local] [--week YYYY-MM-DD] [--send]',
       );
       return 2;
   }

@@ -20,11 +20,13 @@ import { type Candidate, detectAll } from "./detectors.ts";
 import type { Event } from "./events.ts";
 import type { LlmClient } from "./llm.ts";
 import {
+  assertClean,
   DEFAULT_LEVEL,
   type Denylist,
   type RedactedInsight,
   type RedactionLevel,
   redactInsights,
+  redactText,
 } from "./redact.ts";
 import { sessionize } from "./sessionizer.ts";
 import { makeRecord, recordUsage } from "./usage.ts";
@@ -100,12 +102,26 @@ export interface WeekStats {
   tickets: number;
 }
 
+/**
+ * A flat, longitudinal lesson summary (§7) for the digest. The theme layer owns
+ * the lifecycle; synthesis only needs these strings, so it stays decoupled from
+ * `themes.ts` (which depends on this module for the week helpers).
+ */
+export interface DigestLesson {
+  headline: string;
+  trend: string; // e.g. "5 → 3 → 1 ↓ improving"
+  status: string;
+  suggestion: string;
+}
+
 export interface DigestInput {
   week: WeekRange;
   level: RedactionLevel;
   stats: WeekStats;
   insights: Insight[]; // local, pre-redaction (for the operator's own view)
   redacted: RedactedInsight[]; // exactly what would be sent remote
+  lessons: DigestLesson[]; // materially-changed lessons, local view
+  redactedLessons: DigestLesson[]; // the same, redacted — what would be sent
 }
 
 function weekStats(events: Event[]): WeekStats {
@@ -139,6 +155,7 @@ export async function buildDigestInput(
     minConfidence?: number;
     level?: RedactionLevel;
     extraCandidates?: Candidate[];
+    lessons?: DigestLesson[];
   } = {},
 ): Promise<DigestInput> {
   const level = opts.level ?? DEFAULT_LEVEL;
@@ -153,7 +170,31 @@ export async function buildDigestInput(
     minConfidence: opts.minConfidence ?? 0.6,
   });
   const redacted = redactInsights(insights, denylist, salt, level);
-  return { week, level, stats: weekStats(inWeek), insights, redacted };
+  const lessons = opts.lessons ?? [];
+  const redactedLessons = lessons.map((l) => redactLesson(l, denylist, salt, level));
+  return { week, level, stats: weekStats(inWeek), insights, redacted, lessons, redactedLessons };
+}
+
+/** Redact a lesson's text fields at the active tier (fail-closed, §8). */
+function redactLesson(
+  lesson: DigestLesson,
+  denylist: Denylist,
+  salt: string,
+  level: RedactionLevel,
+): DigestLesson {
+  const clean = (s: string): string => {
+    const out = redactText(s, denylist, salt, level);
+    assertClean(out, denylist, level);
+    return out;
+  };
+  // The trend line is just numbers/arrows — no identifiers — but route it through
+  // the gate anyway so nothing bypasses the self-check.
+  return {
+    headline: clean(lesson.headline),
+    trend: clean(lesson.trend),
+    status: lesson.status,
+    suggestion: clean(lesson.suggestion),
+  };
 }
 
 const SYNTHESIS_PROMPT = [
@@ -164,8 +205,10 @@ const SYNTHESIS_PROMPT = [
   "Write a concise digest in Markdown with exactly these sections:",
   "1. **Top insights** — the 3–5 most worthwhile, each: one-line why + the concrete next action.",
   "2. **AI-usage read** — read the stats: where AI clearly helped vs. cost time, and ONE habit to change.",
-  "3. **One experiment** — a single concrete thing to try next week.",
-  "Be specific and brief. Ground every claim in the provided stats/insights — do not invent activity.",
+  "3. **Lessons** — for each tracked LESSON below, one line acknowledging the trend",
+  "(e.g. improving/regressed) like a mentor would; omit this section if none are provided.",
+  "4. **One experiment** — a single concrete thing to try next week.",
+  "Be specific and brief. Ground every claim in the provided stats/insights/lessons — do not invent activity.",
   "Output only the Markdown digest. Do not use any tools.",
 ].join(" ");
 
@@ -192,13 +235,17 @@ function statsBlock(week: WeekRange, stats: WeekStats): string {
 
 /** The exact prompt+payload that would be sent to the remote model. */
 export function buildSynthesisPrompt(input: DigestInput): string {
-  return [
+  const parts = [
     SYNTHESIS_PROMPT,
     "",
     `STATS:\n${statsBlock(input.week, input.stats)}`,
     "",
     `INSIGHTS:\n${JSON.stringify(input.redacted, null, 2)}`,
-  ].join("\n");
+  ];
+  if (input.redactedLessons.length > 0) {
+    parts.push("", `LESSONS:\n${JSON.stringify(input.redactedLessons, null, 2)}`);
+  }
+  return parts.join("\n");
 }
 
 /**
@@ -222,7 +269,6 @@ export function localDigest(input: DigestInput): string {
   ];
   if (input.insights.length === 0) {
     lines.push("", "_No findings above the confidence bar this week._");
-    return lines.join("\n");
   }
   for (const i of input.insights) {
     lines.push(
@@ -233,6 +279,14 @@ export function localDigest(input: DigestInput): string {
     );
     if (i.artifactDraft) {
       lines.push("", `_${i.artifactType}:_`, "```", i.artifactDraft, "```");
+    }
+  }
+  // Lessons render regardless of findings — a lesson often *improves* precisely
+  // because activity dropped, which is the no-findings case.
+  if (input.lessons.length > 0) {
+    lines.push("", "## Lessons");
+    for (const l of input.lessons) {
+      lines.push("", `### ${l.headline}  _(${l.status})_`, `${l.trend}`, `→ **${l.suggestion}**`);
     }
   }
   return lines.join("\n");

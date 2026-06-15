@@ -22,8 +22,14 @@ Copilot chat + local git commits. The model layers (`characterizer.ts`,
 via the `insights` and `ask` commands; both fall back gracefully if Ollama is
 down. The weekly *remote* synthesis (`digest`, via GitHub Copilot CLI) and the
 remote open-ended detector (`explore.ts`, `digest --explore`) are built and
-metered (`usage.ts`). Still pending: themes/lessons (phase 4) and deeper
-longitudinal synthesis (phase 5).
+metered (`usage.ts`). **Phase 4 (themes/lessons) is built** for the
+deterministic-lesson backbone: `themes.ts` persists `lesson`-category
+candidates week-over-week (the `themes`/`theme_observations` tables) and tracks
+a lifecycle (`new → active → improving → regressed → resolved → dormant`) with a
+trend; lessons surface in the `digest` and dashboard **only on material change**
+(§7 anti-Clippy), and `postcaptain lessons` shows the tracked trends. Still
+pending: knowledge-base notes (`kb_notes`/`kb_links`, blocked on a `reading`
+collector / screenpipe) and the self-growing exploration tier (phase 5).
 
 ## Stack & conventions
 
@@ -35,10 +41,13 @@ longitudinal synthesis (phase 5).
   (set at collection time — sensitivity drives all later routing, see §8).
 - **Layout:** `src/` (`events.ts`, `store.ts`, `collectors/`, `sessionizer.ts`,
   `detectors.ts`, `explore.ts` (remote open-ended detector), `characterizer.ts`,
-  `recap.ts`, `redact.ts`, `synthesis.ts`, `usage.ts`, `dashboard.ts`,
-  `cli.ts`); `tests/` holds
+  `recap.ts`, `themes.ts` (longitudinal lessons), `redact.ts`, `synthesis.ts`,
+  `usage.ts`, `dashboard.ts`, `cli.ts`); `tests/` holds
   `*.test.ts` run by `bun test`. Analysis stages (sessionizer, detectors, recap)
-  are pure functions over events — easy to test and re-run.
+  are pure functions over events — easy to test and re-run. `themes.ts` is the
+  one exception by design: it's the **only stateful stage**, persisting derived
+  lesson state across runs in its own tables (the lifecycle logic stays pure;
+  `ThemeStore` is the thin SQLite wrapper, idempotent per `(theme, week)`).
 - **Idempotency:** collectors are re-runnable. Events have a deterministic
   `event_id` derived from the source's natural key; inserts are `OR IGNORE`.
 - **Privacy (tiered, owner-configurable):** the remote redaction level

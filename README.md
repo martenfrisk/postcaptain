@@ -26,8 +26,12 @@ Copilot CLI behind a tiered redaction gate (§8): the **weekly synthesis** and a
 model to surface patterns the fixed detector catalog misses. The local layers
 run on Ollama; the remote stages run on whatever model your Copilot plan exposes
 (`auto` by default). Every remote call is **metered** (`stats` + dashboard).
-Still pending: themes/lessons (phase 4) and deeper longitudinal synthesis
-(phase 5).
+**Lessons (phase 4)** are tracked longitudinally: `lesson`-category patterns are
+followed week-over-week through a lifecycle (`new → improving → regressed →
+resolved → dormant`) and surface — in the `digest`, the dashboard, and
+`postcaptain lessons` — only when they materially change. Still pending: the
+knowledge-base notes (blocked on a reading collector) and the self-growing
+exploration tier (phase 5).
 
 ### Done so far
 
@@ -59,6 +63,10 @@ Still pending: themes/lessons (phase 4) and deeper longitudinal synthesis
   redacted, numbered week to a strong remote model to surface patterns beyond
   the hardcoded detectors; results merge into the same characterize → rank →
   digest pipeline. The deterministic detectors stay the reliable backbone.
+- **Lessons / longitudinal themes** (`src/themes.ts`, `postcaptain lessons`) —
+  the one stateful stage: `lesson`-category patterns are tracked week-over-week
+  (own SQLite tables) through a `new → improving → regressed → resolved →
+  dormant` lifecycle with a trend, surfaced only on material change (anti-Clippy).
 - **Remote-call metering** (`src/usage.ts`) — every Copilot call is logged
   locally (sizes, purpose, reported credits) and shown in `stats` + the
   dashboard. No payload content is stored.
@@ -80,6 +88,9 @@ bun run src/cli.ts insights --db ./postcaptain.db --model llama3.2:latest
 # ask a question about your own activity (retrieval-augmented, local model)
 bun run src/cli.ts ask "when did I work on the proxy config?" --db ./postcaptain.db
 
+# show tracked lessons and their week-over-week trends (local; built up by `digest`)
+bun run src/cli.ts lessons --db ./postcaptain.db
+
 # weekly digest — fully-local render + a preview of exactly what would go remote
 cp redaction.toml.example redaction.toml   # set `level` + denylist for your env
 bun run src/cli.ts digest --db ./postcaptain.db
@@ -97,6 +108,7 @@ Convenient script shortcuts (see `package.json`):
 ```bash
 bun run capture            # bun run src/cli.ts capture
 bun run insights           # local-LLM findings + drafted artifacts
+bun run lessons            # tracked lessons + week-over-week trends
 bun run digest             # local digest + preview (no remote call)
 bun run digest:explore     # + remote open-ended detector (1 remote call)
 bun run digest:send        # explore + remote synthesis (the full path)
@@ -149,10 +161,11 @@ src/
   query.ts             # interactive retrieval-augmented Q&A over the store
   llm.ts               # Ollama client (generate + embeddings) + cosine distance
   recap.ts             # daily recap aggregation
+  themes.ts            # longitudinal lessons: lifecycle + ThemeStore (stateful)
   redact.ts            # tiered §8 redaction gate (secrets always masked)
   synthesis.ts         # weekly digest: local render + remote Copilot synthesis
   usage.ts             # remote-call metering (sizes, purpose, credits)
   dashboard.ts         # local web dashboard (Bun.serve, server-rendered)
-  cli.ts               # capture / stats / insights / ask / digest / serve
+  cli.ts               # run / capture / stats / insights / ask / lessons / digest / serve
 tests/                 # *.test.ts tests (synthetic fixtures + a temp git repo)
 ```

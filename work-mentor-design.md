@@ -225,6 +225,8 @@ Emitted from **themes**, not single candidates. They track whether you're improv
 
 When evidence stays below a floor for a few weeks, the lesson flips to `resolved` with a one-time "you've got this now" close-out, then goes dormant. This is what produces the "I've noticed you're getting better at X" mentor quality rather than a nag that never stops. Each lesson has a stable ID so progress accrues across weeks.
 
+**Implemented (2026-06-15):** `themes.ts` + `ThemeStore`. The lifecycle adds a `regressed` state (a relapse after a prior gain) alongside the five above. The trend metric is the detector's `metric` field (e.g. follow-up-session count), falling back to evidence volume; lower is better, so a falling series reads as `improving`. A week where a previously-tracked lesson does *not* fire is recorded as a zero (`trackWeek`), which is what lets a fading habit actually resolve instead of freezing at its last value. The `floor`/`resolvedWeeks` dials default to `1`/`2` (calibratable per §6). Only the deterministic `lesson`-category candidates are tracked today (currently the prompt-quality / follow-up-habit lesson); promoting *explore* candidates into tracked lessons belongs to phase 5.
+
 ### Knowledge-base outputs
 
 Reading (docs/specs/HN) is captured, summarized, tagged, de-duplicated — and crucially **joined to work**: "you read X about Postgres indexes Tuesday, then spent 40 min on a slow query Friday." That consumption↔work link is the part no off-the-shelf tool does.
@@ -378,10 +380,20 @@ Cap screenpipe's disk usage in its own settings as a backstop.
 1. **Capture + store:** collectors → normalized event store (start with Copilot + GitHub + ActivityWatch + calendar). — *built: Copilot chat + local git collectors → `bun:sqlite` store; sessionizer.*
 2. **Deterministic detectors + daily/weekly digest:** prove the insight format is useful. — *built: no-LLM detectors, daily recap, a local dashboard, and the weekly remote digest (Copilot CLI, behind the redaction gate).*
 3. **Characterizer harness + interactive query:** the one-agent-two-modes layer. — *built: characterizer (local Ollama; candidate → insight + drafted artifact, deterministic fallback) and interactive `ask` (retrieval-augmented Q&A). A full tool-using agent loop is the richer future version.*
-4. **Themes + lessons:** longitudinal tracking. — *pending.*
-5. **Exploration tier:** self-grown detectors + anti-Clippy gates. — *pending (embedding/cosine novelty helper in place via `llm.ts`).*
+4. **Themes + lessons:** longitudinal tracking. — *built (lessons): `themes.ts`
+   persists `lesson`-category candidates week-over-week (`themes` /
+   `theme_observations` tables) and runs the §7 lifecycle (`new → active →
+   improving → regressed → resolved → dormant`) with a trend; lessons surface in
+   the `digest`/dashboard only on material change, and `postcaptain lessons`
+   lists the tracked trends. The knowledge-base half (`kb_notes`/`kb_links`)
+   stays pending — it's blocked on a `reading` collector (screenpipe), not on
+   this layer.*
+5. **Exploration tier:** self-grown detectors + anti-Clippy gates. — *pending
+   (the remote open-ended detector in `explore.ts` is a first cut; promoting its
+   hypotheses into tracked detectors, plus the embedding/cosine novelty gate via
+   `llm.ts`, is the remaining work).*
 
-Built so far: `capture → sessionize → detect → characterize → recap → dashboard`, plus interactive `ask` and the weekly `digest`. Everything through characterization is local (Ollama). The one *remote* piece — the weekly synthesis — is implemented (`src/redact.ts` + `src/synthesis.ts`, the `digest` command) and verified end-to-end through GitHub Copilot CLI in non-interactive mode: the week's local insights are redacted (fail-closed self-check), previewed, and on `--send` synthesized remotely. The remote model runs on `auto` (no premium model required) and sees only pseudonymized conclusions.
+Built so far: `capture → sessionize → detect → characterize → recap → dashboard`, plus interactive `ask`, the longitudinal `themes`/`lessons` layer, and the weekly `digest`. Everything through characterization and lesson-tracking is local (Ollama / SQLite). The one *remote* piece — the weekly synthesis — is implemented (`src/redact.ts` + `src/synthesis.ts`, the `digest` command) and verified end-to-end through GitHub Copilot CLI in non-interactive mode: the week's local insights are redacted (fail-closed self-check), previewed, and on `--send` synthesized remotely. The remote model runs on `auto` (no premium model required) and sees only pseudonymized conclusions.
 
 ---
 

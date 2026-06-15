@@ -35,6 +35,12 @@ export interface Candidate {
   evidence: string[];
   /** 0..1 deterministic heuristic; the ranker applies the ≥0.6 bar (§6). */
   confidence: number;
+  /**
+   * Optional quantity a lesson tracks over weeks (lower = better), e.g. the
+   * count of multi-follow-up sessions. The theme layer (§7) trends it; absent it
+   * falls back to evidence volume. Shortcuts can leave this unset.
+   */
+  metric?: number;
 }
 
 export interface DetectorContext {
@@ -144,6 +150,8 @@ export const followupHabitDetector: Detector = ({ sessions }) => {
       artifactType: "none",
       evidence: multi.flatMap((s) => s.eventIds).slice(0, 20),
       confidence: clamp01(0.4 + ratio * 0.5),
+      // The trend metric (§7): how many sessions needed 3+ follow-ups this week.
+      metric: multi.length,
     },
   ];
 };

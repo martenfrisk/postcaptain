@@ -15,6 +15,7 @@
     "stats": "bun run src/cli.ts stats",
     "insights": "bun run src/cli.ts insights",
     "ask": "bun run src/cli.ts ask",
+    "lessons": "bun run src/cli.ts lessons",
     "digest": "bun run src/cli.ts digest",
     "digest:explore": "bun run src/cli.ts digest --explore",
     "digest:send": "bun run src/cli.ts digest --explore --send",

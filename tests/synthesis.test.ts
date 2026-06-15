@@ -7,6 +7,8 @@ import {
   buildSynthesisPrompt,
   type CopilotRunner,
   type DigestInput,
+  type DigestLesson,
+  localDigest,
   previewText,
   synthesize,
   type WeekStats,
@@ -45,6 +47,8 @@ function mkInput(over: Partial<DigestInput> = {}): DigestInput {
     stats: ZERO_STATS,
     insights: [],
     redacted: [SAMPLE_REDACTED],
+    lessons: [],
+    redactedLessons: [],
     ...over,
   };
 }
@@ -141,6 +145,31 @@ test("synthesize does NOT call the runner when there are no insights", async () 
   const result = await synthesize(mkInput({ redacted: [] }), runner, "auto");
   expect(called).toBe(false);
   expect(result.sent).toBe(false);
+});
+
+test("localDigest renders lessons even when there are NO findings (the improving case)", () => {
+  const lesson: DigestLesson = {
+    headline: "67% of AI sessions needed 3+ follow-ups",
+    trend: "4 → 0 ↓ improving",
+    status: "improving",
+    suggestion: "Front-load context to cut follow-up rounds.",
+  };
+  const md = localDigest(mkInput({ insights: [], lessons: [lesson] }));
+  expect(md).toContain("_No findings above the confidence bar this week._");
+  expect(md).toContain("## Lessons");
+  expect(md).toContain("4 → 0 ↓ improving");
+});
+
+test("buildSynthesisPrompt includes a redacted LESSONS block when lessons are present", () => {
+  const lesson: DigestLesson = {
+    headline: "h",
+    trend: "3 → 1 ↓ improving",
+    status: "improving",
+    suggestion: "s",
+  };
+  const p = buildSynthesisPrompt(mkInput({ redactedLessons: [lesson] }));
+  expect(p).toContain("LESSONS:");
+  expect(p).toContain("3 → 1 ↓ improving");
 });
 
 test("previewText shows the week, the tier, and the exact payload to be sent", () => {
