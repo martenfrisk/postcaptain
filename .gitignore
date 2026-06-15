@@ -1,12 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
-.pytest_cache/
-build/
-dist/
+# Node / Bun
+node_modules/
+*.tsbuildinfo
+.DS_Store
 
 # Local capture artifacts — never commit captured activity
 *.db

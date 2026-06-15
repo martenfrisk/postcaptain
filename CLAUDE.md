@@ -21,12 +21,14 @@ Later collectors (GitHub, ActivityWatch, calendar) normalize into the same store
 
 ## Stack & conventions
 
-- **Language:** Python 3.10+, standard library first. No heavy deps in the
-  capture layer — `sqlite3`, `json`, `pathlib` are enough.
-- **Store:** local SQLite. One `events` table, typed JSON `payload` per kind.
-  Each event carries `project`, `ticket`, `sensitivity` (set at collection time —
-  sensitivity drives all later routing, see §8).
-- **Layout:** `src/postcaptain/` package; `tests/` mirrors it.
+- **Language:** TypeScript on **Bun**. Run TS directly (no build step). The
+  capture layer has **zero runtime dependencies** — `bun:sqlite` and `node:fs`
+  cover it. camelCase in code; SQL columns stay snake_case.
+- **Store:** local SQLite via `bun:sqlite`. One `events` table, typed JSON
+  `payload` per kind. Each event carries `project`, `ticket`, `sensitivity`
+  (set at collection time — sensitivity drives all later routing, see §8).
+- **Layout:** `src/` (`events.ts`, `store.ts`, `collectors/`, `cli.ts`);
+  `tests/` holds `*.test.ts` run by `bun test`.
 - **Idempotency:** collectors are re-runnable. Events have a deterministic
   `event_id` derived from the source's natural key; inserts are `OR IGNORE`.
 - **Privacy:** raw prompts/code never leave the machine. Copilot/GitHub/Jira
@@ -45,15 +47,14 @@ Later collectors (GitHub, ActivityWatch, calendar) normalize into the same store
 ## Commands
 
 ```bash
-# run tests
-python3 -m pytest -q
+bun install              # one-time: dev deps (@types/bun, typescript)
+bun test                 # run the test suite
+bun run typecheck        # tsc --noEmit
 
 # run the capture spike (parses local VS Code Copilot history into a SQLite store)
-python3 -m postcaptain.cli capture --db ./postcaptain.db
-python3 -m postcaptain.cli stats  --db ./postcaptain.db
+bun run src/cli.ts capture --db ./postcaptain.db
+bun run src/cli.ts stats   --db ./postcaptain.db
 ```
-
-(Install dev deps with `pip install -e '.[dev]'` or `uv pip install -e '.[dev]'`.)
 
 ## Gotchas
 

@@ -23,24 +23,26 @@ ActivityWatch and calendar collectors follow, then detectors and the digest.
 
 ### Done so far
 
-- Normalized event model (`postcaptain.events`) — `Event`, the `kind` /
-  `source` / `sensitivity` enums, Jira-ticket extraction, deterministic event ids.
-- SQLite event store (`postcaptain.store`) — one `events` table, idempotent
-  inserts, filtered queries.
-- Copilot collector (`postcaptain.collectors.copilot`) — parses VS Code's
+- Normalized event model (`src/events.ts`) — the `Event` shape, the `kind` /
+  `source` / `sensitivity` types, Jira-ticket extraction, deterministic event ids.
+- SQLite event store (`src/store.ts`, `bun:sqlite`) — one `events` table,
+  idempotent inserts, filtered queries.
+- Copilot collector (`src/collectors/copilot.ts`) — parses VS Code's
   `state.vscdb` session manifest + `chatSessions/*.json` into `ai_interaction`
   events.
 
 ## Quickstart
 
+Built on [Bun](https://bun.sh) — TypeScript runs directly, no build step.
+
 ```bash
-pip install -e '.[dev]'      # or: uv pip install -e '.[dev]'
+bun install                  # dev deps (types only; runtime has zero deps)
 
 # parse local VS Code Copilot history into a SQLite store (idempotent)
-python3 -m postcaptain.cli capture --db ./postcaptain.db
-python3 -m postcaptain.cli stats   --db ./postcaptain.db
+bun run src/cli.ts capture --db ./postcaptain.db
+bun run src/cli.ts stats   --db ./postcaptain.db
 
-python3 -m pytest -q
+bun test                     # run the suite
 ```
 
 Captured data is local and git-ignored (`*.db`).
@@ -48,11 +50,11 @@ Captured data is local and git-ignored (`*.db`).
 ## Layout
 
 ```
-src/postcaptain/
-  events.py            # the normalized Event model + domain keys
-  store.py             # SQLite event store
+src/
+  events.ts            # the normalized Event model + domain keys
+  store.ts             # SQLite event store (bun:sqlite)
   collectors/
-    copilot.py         # VS Code / GitHub Copilot chat collector
-  cli.py               # capture / stats spike runner
-tests/                 # synthetic-fixture tests (no machine data needed)
+    copilot.ts         # VS Code / GitHub Copilot chat collector
+  cli.ts               # capture / stats spike runner
+tests/                 # *.test.ts synthetic-fixture tests (no machine data needed)
 ```

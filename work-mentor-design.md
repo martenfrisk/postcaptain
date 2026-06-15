@@ -127,7 +127,7 @@ CREATE TABLE events (
 -- indexes on ts, (kind, ts), (project, ts), (ticket, ts)
 ```
 
-`sensitivity` is set at collection time and is the max over an event's evidence; it drives all later routing (§8). The `ai_interaction` payload from the Copilot collector carries `prompt`, `prompt_chars`/`response_chars`, `*_tokens_est` (chars ÷ 4), `model`, `agent_mode`, `elapsed_ms`, `is_canceled`, `followup_count`, and `request_index`/`request_count` (a prompt-churn proxy).
+`sensitivity` is set at collection time and is the max over an event's evidence; it drives all later routing (§8). The `ai_interaction` payload from the Copilot collector carries `prompt`, `promptChars`/`responseChars`, `*TokensEst` (chars ÷ 4), `model`, `agentMode`, `elapsedMs`, `isCanceled`, `followupCount`, and `requestIndex`/`requestCount` (a prompt-churn proxy). (Code is TypeScript on Bun — camelCase payload keys; SQL columns stay snake_case.)
 
 ### Candidate → insight contract (illustrative)
 
@@ -341,8 +341,9 @@ Because this is the highest-actionability area and the strategic direction is AI
 
 ## 11. Implementation notes (sketch)
 
-- **Stack to reuse:** screenpipe (reading/knowledge capture) · ActivityWatch (window/focus) · CodeHist / WayLog (Copilot session parsing) · ai-engineering-fluency (token usage, if/when needed) · GitHub + Atlassian MCPs (already in use).
-- **Store:** local SQLite.
+- **Language/runtime:** TypeScript on **Bun** (owner's home stack; runs TS directly, no build step). The capture layer has zero runtime deps — `bun:sqlite` + `node:fs`.
+- **Stack to reuse:** screenpipe (reading/knowledge capture) · ActivityWatch (window/focus) · CodeHist / WayLog (Copilot session parsing — cross-reference; we parse `state.vscdb`+`chatSessions` directly) · ai-engineering-fluency (token usage, if/when needed) · GitHub + Atlassian MCPs (already in use).
+- **Store:** local SQLite (`bun:sqlite`).
 - **Local LLM:** Ollama (collectors, detectors, characterizer, interactive query).
 - **Remote synthesis:** Copilot CLI, non-interactive, `--model claude-sonnet-4.6` (default; revisit), redacted input only, weekly.
 - **Platform:** macOS, `launchd`.

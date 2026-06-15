@@ -1,0 +1,22 @@
+{
+  "name": "postcaptain",
+  "version": "0.0.1",
+  "description": "Local-first AI work mentor — passive capture + a disciplined insight layer.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "author": "Mårten Frisk",
+  "bin": {
+    "postcaptain": "src/cli.ts"
+  },
+  "scripts": {
+    "capture": "bun run src/cli.ts capture",
+    "stats": "bun run src/cli.ts stats",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
