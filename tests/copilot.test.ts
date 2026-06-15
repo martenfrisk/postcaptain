@@ -122,8 +122,12 @@ test("event fields and payload", () => {
 
 test("event ids are stable and idempotent across runs", () => {
   const user = makeWorkspace();
-  const ids1 = collect([user]).map((e) => e.eventId).sort();
-  const ids2 = collect([user]).map((e) => e.eventId).sort();
+  const ids1 = collect([user])
+    .map((e) => e.eventId)
+    .sort();
+  const ids2 = collect([user])
+    .map((e) => e.eventId)
+    .sort();
   expect(ids1).toEqual(ids2);
   expect(ids1[0]!.startsWith("copilot:")).toBe(true);
 });

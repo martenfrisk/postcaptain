@@ -23,7 +23,14 @@
  */
 
 import { Database } from "bun:sqlite";
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,9 +111,9 @@ function readSessionIndex(stateDb: string): Record<string, SessionMeta> {
   copyFileSync(stateDb, copy);
   const db = new Database(copy, { readonly: true });
   try {
-    const row = db.query("SELECT value FROM ItemTable WHERE key = ?").get(SESSION_INDEX_KEY) as
-      | { value: string | Uint8Array }
-      | null;
+    const row = db.query("SELECT value FROM ItemTable WHERE key = ?").get(SESSION_INDEX_KEY) as {
+      value: string | Uint8Array;
+    } | null;
     if (!row?.value) return {};
     const text = typeof row.value === "string" ? row.value : new TextDecoder().decode(row.value);
     const parsed = JSON.parse(text) as { entries?: Record<string, SessionMeta> };
@@ -129,7 +136,11 @@ function responseText(response: unknown): string {
   if (!Array.isArray(response)) return "";
   const out: string[] = [];
   for (const part of response) {
-    if (part && typeof part === "object" && typeof (part as { value?: unknown }).value === "string") {
+    if (
+      part &&
+      typeof part === "object" &&
+      typeof (part as { value?: unknown }).value === "string"
+    ) {
       out.push((part as { value: string }).value);
     }
   }

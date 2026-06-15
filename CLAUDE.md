@@ -47,14 +47,21 @@ Later collectors (GitHub, ActivityWatch, calendar) normalize into the same store
 ## Commands
 
 ```bash
-bun install              # one-time: dev deps (@types/bun, typescript)
+bun install              # one-time: dev deps (@types/bun, typescript, biome)
 bun test                 # run the test suite
 bun run typecheck        # tsc --noEmit
+bun run lint             # biome check (lint + format + import order)
+bun run format           # biome check --write (apply fixes)
 
 # run the capture spike (parses local VS Code Copilot history into a SQLite store)
 bun run src/cli.ts capture --db ./postcaptain.db
 bun run src/cli.ts stats   --db ./postcaptain.db
 ```
+
+Before committing, run `bun run format`, `bun run lint`, `bun run typecheck`, and
+`bun test`. Biome is configured in `biome.json` (double quotes, 2-space, 100-col);
+non-null assertions are allowed in `tests/**` since they pair with strict index
+access.
 
 ## Gotchas
 

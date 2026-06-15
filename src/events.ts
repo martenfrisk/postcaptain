@@ -66,8 +66,8 @@ export const TICKET_RE = /\b([A-Z][A-Z0-9]+-\d+)\b/;
 export function extractTicket(...texts: (string | null | undefined)[]): string | null {
   for (const text of texts) {
     if (!text) continue;
-    const m = text.match(TICKET_RE);
-    if (m) return m[1]!;
+    const key = text.match(TICKET_RE)?.[1];
+    if (key) return key;
   }
   return null;
 }

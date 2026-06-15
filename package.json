@@ -13,9 +13,12 @@
     "capture": "bun run src/cli.ts capture",
     "stats": "bun run src/cli.ts stats",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
     "@types/bun": "latest",
     "typescript": "^5"
   }

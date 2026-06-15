@@ -8,12 +8,7 @@
  */
 
 import { Database } from "bun:sqlite";
-import {
-  type Event,
-  type EventKind,
-  type Sensitivity,
-  type Source,
-} from "./events.ts";
+import type { Event, EventKind, Sensitivity, Source } from "./events.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (

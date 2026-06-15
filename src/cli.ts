@@ -50,9 +50,7 @@ function tally(values: string[]): Map<string, number> {
 }
 
 function topN(counts: Map<string, number>, n: number): Record<string, number> {
-  return Object.fromEntries(
-    [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, n),
-  );
+  return Object.fromEntries([...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, n));
 }
 
 export function main(argv: string[]): number {

@@ -36,16 +36,26 @@ ActivityWatch and calendar collectors follow, then detectors and the digest.
 Built on [Bun](https://bun.sh) — TypeScript runs directly, no build step.
 
 ```bash
-bun install                  # dev deps (types only; runtime has zero deps)
+bun install                  # dev deps (types + tooling; runtime has zero deps)
 
 # parse local VS Code Copilot history into a SQLite store (idempotent)
 bun run src/cli.ts capture --db ./postcaptain.db
 bun run src/cli.ts stats   --db ./postcaptain.db
 
 bun test                     # run the suite
+bun run typecheck            # tsc --noEmit
+bun run lint                 # biome check (lint + format + import order)
+bun run format               # biome check --write (apply fixes)
 ```
 
 Captured data is local and git-ignored (`*.db`).
+
+## Tooling
+
+- **[Biome](https://biomejs.dev)** — lint + format + import organization in one
+  fast pass. Config in `biome.json` (double quotes, 2-space, 100-col). Run
+  `bun run lint` to check, `bun run format` to apply fixes.
+- **TypeScript** — `bun run typecheck` (strict, including `noUncheckedIndexedAccess`).
 
 ## Layout
 

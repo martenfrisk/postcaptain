@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   extractTicket,
   makeEvent,
+  type NewEvent,
   SENSITIVITY_RANK,
   stableEventId,
 } from "../src/events.ts";
@@ -49,9 +50,16 @@ describe("makeEvent", () => {
   });
 
   test("rejects unknown enum values", () => {
-    expect(() =>
-      // @ts-expect-error invalid kind on purpose
-      makeEvent({ eventId: "x", kind: "nope", source: "copilot", ts: 1, sensitivity: "low", payload: {} }),
-    ).toThrow(/unknown kind/);
+    // Bad input arrives at runtime (e.g. a future collector with a typo); the
+    // cast simulates that crossing the type boundary.
+    const bad = {
+      eventId: "x",
+      kind: "nope",
+      source: "copilot",
+      ts: 1,
+      sensitivity: "low",
+      payload: {},
+    } as unknown as NewEvent;
+    expect(() => makeEvent(bad)).toThrow(/unknown kind/);
   });
 });
