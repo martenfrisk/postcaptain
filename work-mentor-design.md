@@ -362,11 +362,13 @@ Cap screenpipe's disk usage in its own settings as a backstop.
 
 ### Suggested phasing
 
-1. **Capture + store:** collectors → normalized event store (start with Copilot + GitHub + ActivityWatch + calendar).
-2. **Deterministic detectors + daily/weekly digest:** prove the insight format is useful.
-3. **Characterizer harness + interactive query:** the one-agent-two-modes layer.
-4. **Themes + lessons:** longitudinal tracking.
-5. **Exploration tier:** self-grown detectors + anti-Clippy gates.
+1. **Capture + store:** collectors → normalized event store (start with Copilot + GitHub + ActivityWatch + calendar). — *built: Copilot chat + local git collectors → `bun:sqlite` store; sessionizer.*
+2. **Deterministic detectors + daily/weekly digest:** prove the insight format is useful. — *built: no-LLM detectors, daily recap, and a local dashboard. Weekly (LLM) digest pending phase 3.*
+3. **Characterizer harness + interactive query:** the one-agent-two-modes layer. — *pending (needs Ollama).*
+4. **Themes + lessons:** longitudinal tracking. — *pending.*
+5. **Exploration tier:** self-grown detectors + anti-Clippy gates. — *pending.*
+
+Built so far is local-only and uses no external services: `capture → sessionize → detect → recap → dashboard`. The model-powered layers (3–5) depend on Ollama / Copilot CLI.
 
 ---
 

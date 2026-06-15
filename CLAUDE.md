@@ -15,9 +15,11 @@ the insight layer (detectors → themes → characterizer → weekly digest).
 
 ## Current phase
 
-**Phase 1 — capture spike** (§11 of the design doc): collectors → normalized
-event store. First slice: the events schema + the Copilot `state.vscdb` parser.
-Later collectors (GitHub, ActivityWatch, calendar) normalize into the same store.
+The local, no-external-services pipeline is working end-to-end (design phases
+1–2): **capture → sessionize → detect → recap → dashboard**. Collectors:
+Copilot chat + local git commits. The model-powered layers (LLM characterizer,
+weekly Copilot-CLI synthesis, themes/lessons, exploration tier) are phases 3–5,
+not built yet — and depend on Ollama / Copilot CLI being wired up.
 
 ## Stack & conventions
 
@@ -27,8 +29,10 @@ Later collectors (GitHub, ActivityWatch, calendar) normalize into the same store
 - **Store:** local SQLite via `bun:sqlite`. One `events` table, typed JSON
   `payload` per kind. Each event carries `project`, `ticket`, `sensitivity`
   (set at collection time — sensitivity drives all later routing, see §8).
-- **Layout:** `src/` (`events.ts`, `store.ts`, `collectors/`, `cli.ts`);
-  `tests/` holds `*.test.ts` run by `bun test`.
+- **Layout:** `src/` (`events.ts`, `store.ts`, `collectors/`, `sessionizer.ts`,
+  `detectors.ts`, `recap.ts`, `dashboard.ts`, `cli.ts`); `tests/` holds
+  `*.test.ts` run by `bun test`. Analysis stages (sessionizer, detectors, recap)
+  are pure functions over events — easy to test and re-run.
 - **Idempotency:** collectors are re-runnable. Events have a deterministic
   `event_id` derived from the source's natural key; inserts are `OR IGNORE`.
 - **Privacy:** raw prompts/code never leave the machine. Copilot/GitHub/Jira
