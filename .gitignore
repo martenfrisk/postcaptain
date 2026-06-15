@@ -3,6 +3,10 @@ node_modules/
 *.tsbuildinfo
 .DS_Store
 
+# Tooling scratch
+.playwright-mcp/
+*.png
+
 # Local capture artifacts — never commit captured activity
 *.db
 *.db-wal

@@ -61,7 +61,8 @@ function topN(counts: Map<string, number>, n: number): Record<string, number> {
 async function serve(dbPath: string, port: number): Promise<number> {
   const { startServer } = await import("./dashboard.ts");
   startServer(dbPath, port);
-  return 0;
+  await new Promise<never>(() => {}); // run until interrupted (Ctrl-C)
+  return 0; // unreachable
 }
 
 export async function main(argv: string[]): Promise<number> {
