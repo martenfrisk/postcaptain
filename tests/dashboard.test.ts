@@ -2,9 +2,22 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildModel, renderPage, startServer } from "../src/dashboard.ts";
-import { type Event, makeEvent } from "../src/events.ts";
+import { activityBins, buildModel, renderPage, startServer } from "../src/dashboard.ts";
+import { type Event, type EventKind, makeEvent } from "../src/events.ts";
 import { EventStore } from "../src/store.ts";
+
+function evk(kind: EventKind, ts: number): Event {
+  return makeEvent({
+    eventId: `${kind}-${ts}`,
+    kind,
+    source: kind === "commit" ? "github" : "copilot",
+    ts,
+    sensitivity: "sensitive",
+    project: "demo",
+    payload: {},
+  });
+}
+const DAY = 24 * 60 * 60 * 1000;
 
 let dir: string;
 let dbPath: string;
@@ -77,6 +90,26 @@ test("renderPage escapes untrusted content (commit subjects, prompts)", () => {
   const html = renderPage(buildModel(store));
   store.close();
   expect(html).not.toContain("<script>alert(1)</script>");
+});
+
+test("activityBins: short spans bin by day, with empty bins included", () => {
+  const base = Date.parse("2026-01-01T10:00:00Z");
+  const { bins, unit } = activityBins([
+    evk("ai_interaction", base),
+    evk("commit", base),
+    evk("commit", base + 2 * DAY), // skip a day → empty middle bin
+  ]);
+  expect(unit).toBe("day");
+  expect(bins).toHaveLength(3);
+  expect(bins[0]).toMatchObject({ ai: 1, commit: 1 });
+  expect(bins[1]).toMatchObject({ ai: 0, commit: 0 }); // the gap is honest
+  expect(bins[2]).toMatchObject({ ai: 0, commit: 1 });
+});
+
+test("activityBins: long spans bin by week", () => {
+  const base = Date.parse("2026-01-01T10:00:00Z");
+  const { unit } = activityBins([evk("commit", base), evk("commit", base + 60 * DAY)]);
+  expect(unit).toBe("week");
 });
 
 test("startServer responds 200 with HTML", async () => {
