@@ -13,3 +13,6 @@ dist/
 *.db-wal
 *.db-shm
 postcaptain.db
+
+# Local redaction denylist — environment-specific company domains/repos
+redaction.toml
